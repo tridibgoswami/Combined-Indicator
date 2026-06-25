@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+node_modules/
+.next/
+*.db
+data/cache/*
+!data/cache/.gitkeep
+logs/*
+!logs/.gitkeep
+outputs/backtests/

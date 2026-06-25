@@ -239,3 +239,39 @@ execution:
 ```
 
 Keep `mode: PAPER` until signals, strikes, orders, and broker positions are verified.
+
+## Running as a platform
+
+The engine above still runs standalone with `python main.py` exactly as
+before — nothing about signal generation, backtesting, or CLI usage has
+changed. On top of it, this repo also ships an optional production
+platform: a FastAPI backend, a Postgres/Redis-backed control plane, and a
+mobile-friendly PWA dashboard for monitoring and controlling the engine
+remotely.
+
+### Engine-only (unchanged)
+
+```bash
+python main.py --from 2026-06-15 --to 2026-06-22
+```
+
+### Full platform (Docker Compose)
+
+```bash
+cp .env.example .env   # fill in AngelOne credentials and secrets, never commit this file
+docker compose -f deployment/docker-compose.yml up -d
+```
+
+This starts Postgres, Redis, the trading engine, the FastAPI backend
+(`backend_api/`), the Next.js PWA dashboard (`mobile_dashboard/`), and an
+nginx reverse proxy. See `docs/ARCHITECTURE.md` for the component
+breakdown, `docs/DEPLOYMENT.md` for VPS/systemd setup, and
+`docs/LIVE_TRADING_CHECKLIST.md` before flipping `execution.mode: LIVE`.
+
+The trading engine process never depends on Postgres/Redis/the API — it
+reads `config/config.yaml` and writes to `outputs/`/`data/cache/` exactly
+as it does standalone. The backend only reads those outputs and writes
+file-based control flags (`EMERGENCY_STOP`, `EXIT_ALL_REQUESTED`) that the
+engine checks before placing orders. If the backend or dashboard goes
+down, the engine keeps trading uninterrupted; see
+`docs/FAILURE_SCENARIOS.md`.

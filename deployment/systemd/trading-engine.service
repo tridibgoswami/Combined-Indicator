@@ -1,0 +1,15 @@
+[Unit]
+Description=Trading Engine (signal generation, backtest, live execution)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/trading-platform
+ExecStart=/opt/trading-platform/.venv/bin/python main.py
+Restart=on-failure
+RestartSec=10
+EnvironmentFile=/opt/trading-platform/.env
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,15 @@
+# Failure Scenarios
+
+| Scenario | Detection | Behavior | Recovery |
+|---|---|---|---|
+| AngelOne candle API rate limit | `_is_rate_limit_error` in `runner.py` matches the broker error text | Backs off `live.rate_limit_backoff_seconds` (default 180s) before retrying | Automatic; no action needed |
+| AngelOne login/session expiry | `broker.connect()` raises at startup | Process exits non-zero | systemd/Docker `restart: unless-stopped`/`Restart=on-failure` brings it back; it re-logs in on restart |
+| Broker position disagrees with strategy's reconstructed position at startup | `ExecutionManager.startup_sync` compares `get_net_position_qty()` to desired position | Writes `data/cache/EMERGENCY_STOP`, execution pauses (no new orders), engine keeps generating signals/dashboard | Manually reconcile the broker position, delete `EMERGENCY_STOP`, restart or wait for next signal |
+| Backend API can't reach Postgres/Redis | `GET /health` reports `database`/`redis` as `error: ...` | API still serves config/health; DB-backed routes will 500 | Fix DB/Redis connectivity; the trading engine itself is unaffected since it doesn't depend on either |
+| Backend API process crashes | `engine_controller.status()` reads PID file independently of the API process | Trading engine subprocess keeps running (it's a separate process, not a thread of the API) | Restart `backend-api` service/container; it re-attaches to the same PID file |
+| Duplicate/replayed candle-close event | Idempotency key `f"{candle_datetime}:{instrument_mode}:{position}"` in `ExecutionManager.align_to_strategy` | Second call with the same key is a no-op | Automatic |
+| Partial fill / failed order from broker | `broker.place_order` response is logged via `_send` -> `_log_order` regardless of success | Order row is written to `outputs/orders.csv` with the raw broker response (including failure reason) | Inspect `orders.csv`, manually adjust position if the fill was partial; current code does not auto-retry partial fills |
+| Emergency stop requested mid-session | `POST /risk/disable-live-trading` writes `EMERGENCY_STOP` (Redis + file) | Every subsequent `align_to_strategy` call logs a `BLOCKED` row and returns without ordering | `POST /risk/exit-all` to flatten manually if a position is already open, then clear `EMERGENCY_STOP` when ready to resume |
+| Market closed / holiday at startup | `market_state()` in `runner.py` | Reconstructs last known state from broker history, prints dashboard, exits gracefully (or sleeps if `stay_alive_on_closed_day: true`) | Automatic; next run picks up from the next trading session |
+| Config edited to an invalid combination (e.g. unsupported `instrument_mode`) | `ExecutionManager.align_to_strategy` raises `RuntimeError` for unknown modes | Engine process crashes loudly rather than silently misbehaving | Fix `config/config.yaml`, restart |
+| Dashboard loses connectivity to backend | `apiFetch` throws; pages render with last-known/empty state | No new control actions possible from the dashboard, but the engine keeps running independently | Restore network/backend; refresh dashboard |
