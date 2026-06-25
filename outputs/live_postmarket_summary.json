@@ -1,0 +1,43 @@
+{
+  "signals": 36,
+  "closed_trades": 33,
+  "wins": 13,
+  "losses": 20,
+  "flat": 0,
+  "win_rate": 39.39393939393939,
+  "net_points": 1337.700000000019,
+  "open_points": 804.1499999999942,
+  "gross_profit": 5239.05000000001,
+  "gross_loss": 3901.3499999999913,
+  "profit_factor": 1.3428813103156656,
+  "best_trade": 1300.25,
+  "worst_trade": -250.0,
+  "max_drawdown": 1215.9999999999927,
+  "current_position": "LONG",
+  "current_entry_price": 57368.55,
+  "current_entry_time": "2026-06-24 09:15:00+05:30",
+  "last_signal": {
+    "datetime": "2026-06-24 09:15:00+05:30",
+    "signal": "BUY",
+    "price": 57368.55,
+    "hma": 57131.899952380954,
+    "atr_stop": 57087.83199985935,
+    "is_chop": false,
+    "source": "INDICATOR",
+    "entry_time_blocked": false
+  },
+  "last_risk_exit": {
+    "datetime": "2026-06-12 09:15:00+05:30",
+    "signal": "MAE_EXIT_SHORT",
+    "price": 55544.8,
+    "points": -250.0,
+    "mae_points": 250.0
+  },
+  "blocked_side_after_mae": null,
+  "mae_enabled": true,
+  "mae_points": 250.0,
+  "time_block_filter_enabled": true,
+  "blocked_entry_windows": [
+    "10:30-11:15"
+  ]
+}
