@@ -1,0 +1,170 @@
+engine:
+  mode: live
+  timezone: Asia/Kolkata
+  output_dir: outputs
+  log_dir: logs
+instrument:
+  symbol: BANKNIFTY
+  tradingsymbol: BANKNIFTY
+  exchange: NSE
+  symboltoken: '99926009'
+  interval: FIVE_MINUTE
+  timeframe_minutes: 5
+  session_start: 09:15
+  session_end: '15:30'
+  lot_size: 30
+  lots: 1
+  mintick: 0.05
+indicator:
+  ut_key_value: 3.0
+  ut_atr_period: 14
+  use_heikin_ashi_source: false
+  hma_period: 14
+  enable_chop_filter: false
+  chop_mode: Medium
+  use_hma_trend_filter: true
+  use_hma_slope_filter: true
+  use_distance_filter: true
+  use_cooldown_filter: true
+  use_range_filter: false
+  slope_len: 3
+  atr_norm_len: 14
+  manual_slope_threshold: 0.045
+  use_auto_threshold: true
+  manual_distance_mult: 0.1
+  use_auto_distance: true
+  cooldown_bars_manual: 3
+  range_lookback: 9
+backtest:
+  source: broker
+  use_csv: false
+  csv_path: data/sample.csv
+  start: ''
+  end: ''
+  export: backtest_results.csv
+  warmup_days: 10
+  warmup_calendar_multiplier: 3
+  force_refresh: false
+data:
+  use_cache: true
+  cache_dir: data/cache
+  max_days_per_fetch: 30
+  fetch_sleep_seconds: 0.35
+replay:
+  csv_path: data/sample.csv
+  until: ''
+live:
+  warmup_days: 10
+  warmup_calendar_multiplier: 3
+  pre_market_refresh_seconds: 5
+  poll_seconds: 10
+  candle_close_buffer_seconds: 5
+  status_refresh_seconds: 30
+  rate_limit_backoff_seconds: 180
+  post_market_refresh_seconds: 60
+  reconnect_attempts: 10
+market:
+  session_start: 09:15
+  first_trade_time: 09:15
+  session_end: '15:30'
+  auto_exit_after_market_close: true
+  stay_alive_on_closed_day: false
+  holidays: []
+broker:
+  name: angelone
+  angelone:
+    api_key: ''
+    client_id: ''
+    mpin: ''
+    totp_secret: ''
+entry_filters:
+  enable_time_block_filter: true
+  blocked_entry_windows:
+  - 10:30-11:15
+  - 12:45-13:30
+risk_management:
+  mode: FIXED_POINTS
+  enable_mae_exit: true
+  mae_points: 250
+trading:
+  paper_trade: true
+  execute_orders: false
+  quantity: 0
+  producttype: INTRADAY
+  variety: NORMAL
+  ordertype: MARKET
+  duration: DAY
+  lots: 1
+notifications:
+  telegram:
+    enabled: false
+    bot_token: ''
+    chat_id: ''
+execution:
+  enabled: true
+  mode: PAPER
+  allow_live_orders: false
+  auto_select_futures: true
+  underlying: BANKNIFTY
+  exchange: NFO
+  instrument_type: FUTIDX
+  expiry_mode: NEAREST
+  lots: 1
+  quantity: 0
+  trade_reconstructed_position_on_startup: false
+  reconcile_on_startup: true
+  instrument_selector:
+    enabled: true
+    underlying: BANKNIFTY
+    exchange: NFO
+    instrument_type: FUTIDX
+    expiry_mode: NEAREST
+    master_url: https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json
+    cache_path: data/cache/angelone_scrip_master.json
+    refresh_hours: 12
+    force_refresh: false
+  resolved_instrument: {}
+  enabled_modes:
+  - FUTURES
+  - OPTION_BUYING
+  - OPTION_SELLING
+option_execution:
+  enabled: true
+  underlying: BANKNIFTY
+  exchange: NFO
+  expiry_mode: NEAREST
+  strike_selection:
+    mode: DELTA
+    target_delta: 0.6
+    fallback: ATM
+    strike_step: 100
+  option_buying:
+    buy_signal_option: CE
+    sell_signal_option: PE
+  option_selling:
+    buy_signal_strategy: BULL_PUT_SPREAD
+    sell_signal_strategy: BEAR_CALL_SPREAD
+    short_delta: 0.3
+    hedge_selection_mode: PREMIUM
+    hedge_premium_min: 10
+    hedge_premium_max: 30
+    hedge_max_scan_strikes: 20
+    fallback_mode: STRIKE_DISTANCE
+    fallback_distance_points: 500
+    hedge_strikes: 5
+    hedge_distance_points: 0
+execution_engines:
+  futures:
+    enabled: true
+    quantity_lots: 1
+  option_buying:
+    enabled: true
+    quantity_lots: 1
+    strike_selection:
+      mode: DELTA
+      target_delta: 0.6
+      fallback: ATM
+  option_selling:
+    enabled: true
+    quantity_lots: 1
+    strategy: CREDIT_SPREAD
