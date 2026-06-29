@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from trading_engine.config import load_config
-from trading_engine.runner import run_from_config
+from engine.config import load_config
+from engine.runner import run_from_config
 
 
 def parse_args() -> argparse.Namespace:

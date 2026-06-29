@@ -240,38 +240,72 @@ execution:
 
 Keep `mode: PAPER` until signals, strikes, orders, and broker positions are verified.
 
-## Running as a platform
+## Console Enhancements Added
 
-The engine above still runs standalone with `python main.py` exactly as
-before — nothing about signal generation, backtesting, or CLI usage has
-changed. On top of it, this repo also ships an optional production
-platform: a FastAPI backend, a Postgres/Redis-backed control plane, and a
-mobile-friendly PWA dashboard for monitoring and controlling the engine
-remotely.
+This build improves live console visibility without changing signal generation:
 
-### Engine-only (unchanged)
+- Prints a highlighted `TRADE CLOSED` block when a reversal or MAE exit closes the previous trade.
+- Highlights `CURRENT STATUS`, BUY/SELL direction, open points and open PnL using ANSI colors.
+- Shows configured execution mode in the live dashboard.
+- Paper/live execution order blocks now clearly display selected futures/options contracts:
+  - tradingsymbol
+  - token
+  - strike
+  - CE/PE
+  - expiry
+  - selection mode
+  - LTP/premium when available
+  - quantity
+  - paper/live status
+- Supports legacy top-level `instrument_mode` / `execution_mode` keys as well as nested `execution.instrument_mode`.
 
-```bash
-python main.py --from 2026-06-15 --to 2026-06-22
+These are presentation/execution-log enhancements only. The Pine replica signal logic is unchanged.
+
+## Console/Shutdown fixes
+
+- Ctrl+C now exits gracefully without a Python traceback.
+- Live startup now prints an immediate cached reconstructed dashboard before any long AngelOne rate-limit backoff wait.
+- Broker fetches still happen on candle-close schedule; cached startup display is only for immediate visibility.
+
+
+## Multi-execution paper mode
+
+The engine can now fan out the same BUY/SELL signal to multiple execution adapters at the same time.
+This is intended for paper comparison of Futures vs Option Buying vs Option Selling without changing the signal logic.
+
+```yaml
+execution:
+  enabled: true
+  mode: PAPER
+  allow_live_orders: false
+  enabled_modes:
+    - FUTURES
+    - OPTION_BUYING
+    - OPTION_SELLING
+
+option_execution:
+  strike_selection:
+    mode: DELTA
+    target_delta: 0.60
+    fallback: ATM
+  option_selling:
+    short_delta: 0.30
+    hedge_selection_mode: PREMIUM
+    hedge_premium_min: 10
+    hedge_premium_max: 30
+    fallback_mode: STRIKE_DISTANCE
+    fallback_distance_points: 500
 ```
 
-### Full platform (Docker Compose)
+On a BUY signal:
+- FUTURES: buy/long active BANKNIFTY future.
+- OPTION_BUYING: buy selected CE.
+- OPTION_SELLING: create Bull Put Spread: sell PE short leg and buy low-premium PE hedge.
 
-```bash
-cp .env.example .env   # fill in AngelOne credentials and secrets, never commit this file
-docker compose -f deployment/docker-compose.yml up -d
-```
+On a SELL signal:
+- FUTURES: sell/short active BANKNIFTY future.
+- OPTION_BUYING: buy selected PE.
+- OPTION_SELLING: create Bear Call Spread: sell CE short leg and buy low-premium CE hedge.
 
-This starts Postgres, Redis, the trading engine, the FastAPI backend
-(`backend_api/`), the Next.js PWA dashboard (`mobile_dashboard/`), and an
-nginx reverse proxy. See `docs/ARCHITECTURE.md` for the component
-breakdown, `docs/DEPLOYMENT.md` for VPS/systemd setup, and
-`docs/LIVE_TRADING_CHECKLIST.md` before flipping `execution.mode: LIVE`.
-
-The trading engine process never depends on Postgres/Redis/the API — it
-reads `config/config.yaml` and writes to `outputs/`/`data/cache/` exactly
-as it does standalone. The backend only reads those outputs and writes
-file-based control flags (`EMERGENCY_STOP`, `EXIT_ALL_REQUESTED`) that the
-engine checks before placing orders. If the backend or dashboard goes
-down, the engine keeps trading uninterrupted; see
-`docs/FAILURE_SCENARIOS.md`.
+In PAPER mode no real broker order is placed, but all selected instruments and simulated orders are printed and written to `outputs/orders.csv`.
+Live orders still require both `mode: LIVE` and `allow_live_orders: true`.
