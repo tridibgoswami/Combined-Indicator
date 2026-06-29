@@ -1,0 +1,23 @@
+# Non-secret instrument/expiry rules. Tokens are never hardcoded here -
+# they are resolved at runtime from the AngelOne scrip master
+# (see trading_engine/instrument_selector/instrument_selector.py).
+underlyings:
+  BANKNIFTY:
+    exchange: NFO
+    futures_instrument_type: FUTIDX
+    options_instrument_type: OPTIDX
+    expiry_rule: MONTHLY
+    default_lot_size: 30
+    strike_step: 100
+  NIFTY:
+    exchange: NFO
+    futures_instrument_type: FUTIDX
+    options_instrument_type: OPTIDX
+    expiry_rule: WEEKLY_TUESDAY
+    default_lot_size: 75
+    strike_step: 50
+
+scrip_master:
+  url: https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json
+  cache_path: data/cache/angelone_scrip_master.json
+  refresh_hours: 12

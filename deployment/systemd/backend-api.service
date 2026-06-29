@@ -1,0 +1,15 @@
+[Unit]
+Description=Trading Platform Backend API (FastAPI)
+After=network-online.target postgresql.service redis.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/trading-platform
+ExecStart=/opt/trading-platform/.venv/bin/uvicorn backend_api.app.main:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=10
+EnvironmentFile=/opt/trading-platform/.env
+
+[Install]
+WantedBy=multi-user.target
