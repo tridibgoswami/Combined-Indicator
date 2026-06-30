@@ -79,25 +79,24 @@ export default function Dashboard() {
                 label="Open points"
                 value={<span style={{ color: pointsColor(position.open_points) }}>{fmtNum(position.open_points)}</span>}
               />
+              {pnl && !isFlat && (
+                <Row
+                  label="Open PnL (₹)"
+                  value={<span style={{ color: pointsColor(pnl.open_pnl) }}>₹{fmtNum(pnl.open_pnl)}</span>}
+                />
+              )}
             </>
           ) : (
             <Empty text="No open position (FLAT)" />
           )}
         </Card>
 
-        <Card emoji="💰" title="Open PnL">
+        <Card emoji="💰" title="Session PnL (Realized)">
           {pnl ? (
-            <>
-              <Row
-                label="Net points"
-                value={<span style={{ color: pointsColor(pnl.net_points) }}>{fmtNum(pnl.net_points)}</span>}
-              />
-              <Row
-                label="Open points"
-                value={<span style={{ color: pointsColor(pnl.open_points) }}>{fmtNum(pnl.open_points)}</span>}
-              />
-              <Row label="Position" value={<Badge>{pnl.current_position || "FLAT"}</Badge>} />
-            </>
+            <Row
+              label="Net points"
+              value={<span style={{ color: pointsColor(pnl.net_points) }}>{fmtNum(pnl.net_points)}</span>}
+            />
           ) : (
             <Empty />
           )}

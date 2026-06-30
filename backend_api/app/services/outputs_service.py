@@ -37,9 +37,16 @@ def get_summary() -> dict[str, Any]:
 
 
 def get_pnl() -> dict[str, Any]:
+    from backend_api.app.services.config_service import read_config
+
     summary = get_summary()
+    open_points = float(summary.get("open_points", 0) or 0)
+    instrument = (read_config() or {}).get("instrument", {}) or {}
+    lot_size = float(instrument.get("lot_size", 1) or 1)
+    lots = float(instrument.get("lots", 1) or 1)
     return {
         "net_points": summary.get("net_points", 0),
-        "open_points": summary.get("open_points", 0),
+        "open_points": open_points,
+        "open_pnl": open_points * lot_size * lots,
         "current_position": summary.get("current_position", "FLAT"),
     }
