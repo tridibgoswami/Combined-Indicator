@@ -602,6 +602,11 @@ def run_live(cfg: Dict[str, Any]) -> None:
     instrument_mode = exec_cfg.get("instrument_mode") or exec_cfg.get("execution_mode")
     write_heartbeat(engine_mode, instrument_mode, detail="running")
 
+    control_dir = Path(exec_cfg.get("control_dir") or "data/cache")
+    if not control_dir.is_absolute():
+        control_dir = Path(__file__).resolve().parents[1] / control_dir
+    pause_flag = control_dir / "ENGINE_PAUSED"
+
     poll_seconds = max(1, int(live.get("poll_seconds", 10) or 10))
     candle_close_buffer_seconds = max(0, int(live.get("candle_close_buffer_seconds", 5) or 5))
     rate_limit_backoff_seconds = max(60, int(live.get("rate_limit_backoff_seconds", 180) or 180))
@@ -617,6 +622,11 @@ def run_live(cfg: Dict[str, Any]) -> None:
     startup_signal_results_shown = False
 
     while True:
+        if pause_flag.exists():
+            write_heartbeat(engine_mode, instrument_mode, detail="paused")
+            time.sleep(poll_seconds)
+            continue
+
         now = pd.Timestamp(datetime.now(tz))
         state, status_text, target = market_state(now, cfg)
         write_heartbeat(engine_mode, instrument_mode, detail=state)

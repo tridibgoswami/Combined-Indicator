@@ -54,6 +54,7 @@ export function badgeTone(value?: string | null): keyof typeof TONE_COLORS {
   const v = (value || "").toUpperCase();
   if (["RUNNING", "CONNECTED", "LONG", "BUY", "OK", "CLOSED", "PAPER"].includes(v)) return "green";
   if (["STOPPED", "DISCONNECTED", "SHORT", "SELL", "ERROR", "LIVE"].includes(v)) return v === "LIVE" ? "orange" : "red";
+  if (v === "PAUSED") return "orange";
   if (["FLAT", "UNKNOWN"].includes(v)) return "gray";
   return "blue";
 }

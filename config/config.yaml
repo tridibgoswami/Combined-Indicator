@@ -68,7 +68,7 @@ market:
   first_trade_time: 09:15
   session_end: '15:30'
   auto_exit_after_market_close: true
-  stay_alive_on_closed_day: false
+  stay_alive_on_closed_day: true
   holidays: []
 broker:
   name: angelone
