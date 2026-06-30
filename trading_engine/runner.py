@@ -15,6 +15,7 @@ from trading_engine.signal_engine.indicator import calculate_pine_replica
 from trading_engine.signal_engine.trades import build_trades
 from trading_engine.execution_engine.execution import ExecutionManager
 from trading_engine.instrument_selector.instrument_selector import select_nearest_futures, apply_execution_instrument
+from trading_engine.heartbeat import write_heartbeat
 
 
 # -----------------------------------------------------------------------------
@@ -596,6 +597,11 @@ def run_live(cfg: Dict[str, Any]) -> None:
     execution_manager = ExecutionManager(cfg, broker, out_dir)
     execution_started = False
 
+    exec_cfg = cfg.get("execution", {}) or {}
+    engine_mode = str(exec_cfg.get("mode", "PAPER"))
+    instrument_mode = exec_cfg.get("instrument_mode") or exec_cfg.get("execution_mode")
+    write_heartbeat(engine_mode, instrument_mode, detail="running")
+
     poll_seconds = max(1, int(live.get("poll_seconds", 10) or 10))
     candle_close_buffer_seconds = max(0, int(live.get("candle_close_buffer_seconds", 5) or 5))
     rate_limit_backoff_seconds = max(60, int(live.get("rate_limit_backoff_seconds", 180) or 180))
@@ -613,6 +619,7 @@ def run_live(cfg: Dict[str, Any]) -> None:
     while True:
         now = pd.Timestamp(datetime.now(tz))
         state, status_text, target = market_state(now, cfg)
+        write_heartbeat(engine_mode, instrument_mode, detail=state)
 
         if state in {"CLOSED_WEEKEND", "CLOSED_HOLIDAY"}:
             reason = "weekend" if state == "CLOSED_WEEKEND" else "holiday"

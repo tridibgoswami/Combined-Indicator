@@ -10,6 +10,7 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 EMERGENCY_STOP_KEY = "engine:emergency_stop"
 ENGINE_STATE_KEY = "engine:state"
+HEARTBEAT_KEY = "engine:heartbeat"
 RATE_LIMIT_PREFIX = "ratelimit:"
 
 
@@ -36,6 +37,17 @@ def set_emergency_stop(active: bool) -> None:
 
 def is_emergency_stopped() -> bool:
     return get_redis().exists(EMERGENCY_STOP_KEY) == 1
+
+
+def get_heartbeat() -> dict[str, Any] | None:
+    """Returns the trading_engine's last heartbeat payload, or None if missing/
+    expired/unreachable. The heartbeat key has a TTL set by the engine itself,
+    so its mere presence indicates the engine process is alive and recent."""
+    try:
+        raw = get_redis().get(HEARTBEAT_KEY)
+    except Exception:
+        return None
+    return json.loads(raw) if raw else None
 
 
 def acquire_rate_limit_lock(name: str, ttl_seconds: int = 5) -> bool:

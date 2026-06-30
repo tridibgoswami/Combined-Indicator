@@ -36,14 +36,21 @@ def _is_running(pid: Optional[int]) -> bool:
 def status() -> dict:
     pid = _read_pid()
     running = _is_running(pid)
+    heartbeat = redis_state.get_heartbeat()
+    # In a Docker Compose deployment the engine runs as its own container
+    # process rather than being spawned by backend_api, so the PID file is
+    # never created. A recent Redis heartbeat (TTL-bound, written by the
+    # engine itself) is then the only valid liveness signal.
+    if heartbeat is not None:
+        running = True
     state_data = redis_state.get_engine_state() or {}
     return {
         "engine_id": ENGINE_ID,
         "state": "RUNNING" if running else "STOPPED",
-        "mode": state_data.get("mode", "PAPER"),
-        "instrument_mode": state_data.get("instrument_mode"),
-        "pid": pid if running else None,
-        "detail": state_data.get("detail"),
+        "mode": (heartbeat or {}).get("mode") or state_data.get("mode", "PAPER"),
+        "instrument_mode": (heartbeat or {}).get("instrument_mode") or state_data.get("instrument_mode"),
+        "pid": pid if pid and _is_running(pid) else None,
+        "detail": (heartbeat or {}).get("detail") or state_data.get("detail"),
     }
 
 
