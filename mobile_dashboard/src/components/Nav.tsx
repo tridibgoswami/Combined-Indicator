@@ -8,6 +8,7 @@ const LINKS = [
   { href: "/backtest", label: "Backtest" },
   { href: "/risk", label: "Risk" },
   { href: "/settings", label: "Settings" },
+  { href: "/login", label: "Login" },
 ];
 
 export default function Nav() {
