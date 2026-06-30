@@ -1,25 +1,34 @@
 import { useEffect, useState } from "react";
 import Nav from "@/components/Nav";
 import { apiFetch } from "@/lib/api";
+import { Badge, Card, Empty, Row, fmtNum, pointsColor } from "@/components/ui";
 
 export default function Dashboard() {
   const [engineStatus, setEngineStatus] = useState<any>(null);
   const [brokerStatus, setBrokerStatus] = useState<any>(null);
-  const [positions, setPositions] = useState<any>(null);
+  const [position, setPosition] = useState<any>(null);
   const [pnl, setPnl] = useState<any>(null);
   const [signals, setSignals] = useState<any[]>([]);
+  const [offline, setOffline] = useState(false);
 
   useEffect(() => {
     const load = async () => {
       try {
-        setEngineStatus(await apiFetch("/engine/status"));
-        setBrokerStatus(await apiFetch("/broker/status"));
-        setPositions(await apiFetch("/positions"));
-        setPnl(await apiFetch("/pnl"));
-        const sig = await apiFetch("/signals");
-        setSignals(sig.slice(-1));
+        const [engine, broker, pos, pnlData, sig] = await Promise.allSettled([
+          apiFetch("/engine/status"),
+          apiFetch("/broker/status"),
+          apiFetch("/positions"),
+          apiFetch("/pnl"),
+          apiFetch("/signals"),
+        ]);
+        setEngineStatus(engine.status === "fulfilled" ? engine.value : null);
+        setBrokerStatus(broker.status === "fulfilled" ? broker.value : null);
+        setPosition(pos.status === "fulfilled" ? pos.value : null);
+        setPnl(pnlData.status === "fulfilled" ? pnlData.value : null);
+        setSignals(sig.status === "fulfilled" ? sig.value.slice(-1) : []);
+        setOffline(false);
       } catch {
-        // Surfaced via empty state below; dashboard stays usable while offline.
+        setOffline(true);
       }
     };
     load();
@@ -27,20 +36,85 @@ export default function Dashboard() {
     return () => clearInterval(id);
   }, []);
 
+  const lastSignal = signals[0];
+  const isFlat = !position || position.current_position === "FLAT" || !position.current_position;
+
   return (
     <div>
       <Nav />
-      <div style={{ padding: 16, display: "grid", gap: 12 }}>
-        <h2>Engine Status</h2>
-        <pre>{JSON.stringify(engineStatus, null, 2)}</pre>
-        <h2>Broker Status</h2>
-        <pre>{JSON.stringify(brokerStatus, null, 2)}</pre>
-        <h2>Current Position</h2>
-        <pre>{JSON.stringify(positions, null, 2)}</pre>
-        <h2>Open PnL</h2>
-        <pre>{JSON.stringify(pnl, null, 2)}</pre>
-        <h2>Last Signal</h2>
-        <pre>{JSON.stringify(signals[0] || {}, null, 2)}</pre>
+      <div style={{ padding: 16, maxWidth: 560, margin: "0 auto" }}>
+        {offline && <Card emoji="⚠️" title="Connection issue">Couldn&apos;t reach the API. Pull to refresh.</Card>}
+
+        <Card emoji="⚙️" title="Engine Status">
+          {engineStatus ? (
+            <>
+              <Row label="State" value={<Badge>{engineStatus.state}</Badge>} />
+              <Row label="Mode" value={<Badge>{engineStatus.mode}</Badge>} />
+              {engineStatus.instrument_mode && <Row label="Instrument mode" value={engineStatus.instrument_mode} />}
+              {engineStatus.detail && <Row label="Detail" value={engineStatus.detail} />}
+            </>
+          ) : (
+            <Empty text="Engine status unavailable" />
+          )}
+        </Card>
+
+        <Card emoji="📶" title="Broker Status">
+          {brokerStatus ? (
+            <>
+              <Row label="Status" value={<Badge>{brokerStatus.status}</Badge>} />
+              {brokerStatus.detail && <Row label="Detail" value={brokerStatus.detail} />}
+            </>
+          ) : (
+            <Empty text="Broker status unavailable" />
+          )}
+        </Card>
+
+        <Card emoji={isFlat ? "⚪" : position.current_position === "LONG" ? "🟢" : "🔴"} title="Current Position">
+          {!isFlat ? (
+            <>
+              <Row label="Open position" value={<Badge>{position.current_position}</Badge>} />
+              <Row label="Entry price" value={fmtNum(position.entry_price)} />
+              <Row label="Entry time" value={position.entry_time || "-"} />
+              <Row
+                label="Open points"
+                value={<span style={{ color: pointsColor(position.open_points) }}>{fmtNum(position.open_points)}</span>}
+              />
+            </>
+          ) : (
+            <Empty text="No open position (FLAT)" />
+          )}
+        </Card>
+
+        <Card emoji="💰" title="Open PnL">
+          {pnl ? (
+            <>
+              <Row
+                label="Net points"
+                value={<span style={{ color: pointsColor(pnl.net_points) }}>{fmtNum(pnl.net_points)}</span>}
+              />
+              <Row
+                label="Open points"
+                value={<span style={{ color: pointsColor(pnl.open_points) }}>{fmtNum(pnl.open_points)}</span>}
+              />
+              <Row label="Position" value={<Badge>{pnl.current_position || "FLAT"}</Badge>} />
+            </>
+          ) : (
+            <Empty />
+          )}
+        </Card>
+
+        <Card emoji="📡" title="Last Signal">
+          {lastSignal ? (
+            <>
+              <Row label="Signal" value={<Badge>{lastSignal.signal}</Badge>} />
+              <Row label="Price" value={fmtNum(lastSignal.price)} />
+              <Row label="Time" value={lastSignal.datetime || "-"} />
+              {lastSignal.is_chop !== undefined && <Row label="Chop filtered" value={String(lastSignal.is_chop)} />}
+            </>
+          ) : (
+            <Empty text="No signals yet" />
+          )}
+        </Card>
       </div>
     </div>
   );

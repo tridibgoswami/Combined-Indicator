@@ -9,6 +9,16 @@ from backend_api.app.services import engine_controller, outputs_service
 router = APIRouter(tags=["trading"])
 
 
+@router.get("/broker/status")
+def broker_status(user: User = Depends(get_current_user)):
+    eng_status = engine_controller.status()
+    connected = eng_status["state"] == "RUNNING"
+    return {
+        "status": "CONNECTED" if connected else "DISCONNECTED",
+        "detail": "AngelOne session active via running engine" if connected else "Engine not running",
+    }
+
+
 @router.get("/positions")
 def positions(user: User = Depends(get_current_user)):
     summary = outputs_service.get_summary()
