@@ -19,6 +19,8 @@ jobs:
         run: python -m compileall trading_engine backend_api main.py
       - name: Run tests
         run: pytest -q
+        env:
+          PYTHONPATH: ${{ github.workspace }}
 
   build-images:
     needs: lint-and-test
