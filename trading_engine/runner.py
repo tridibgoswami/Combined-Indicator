@@ -550,6 +550,73 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     return "access rate" in txt or "exceeding access rate" in txt or "rate" in txt and "exceed" in txt
 
 
+def _get_resolved_expiry(cfg: Dict[str, Any]):
+    """Return a date object for the resolved futures contract expiry, or None."""
+    from trading_engine.instrument_selector.instrument_selector import _parse_expiry
+    resolved = (cfg.get("execution", {}) or {}).get("resolved_instrument", {}) or {}
+    raw = resolved.get("expiry") or resolved.get("expiry_date")
+    if not raw:
+        return None
+    try:
+        return _parse_expiry(str(raw))
+    except Exception:
+        return None
+
+
+def _is_expiry_today(cfg: Dict[str, Any], today_date) -> bool:
+    """Return True if the resolved futures contract expires today."""
+    expiry = _get_resolved_expiry(cfg)
+    if expiry is None:
+        return False
+    # _parse_expiry returns a date; compare only the date part
+    try:
+        from datetime import date as _date
+        if hasattr(expiry, "date"):
+            expiry = expiry.date()
+        if hasattr(today_date, "date"):
+            today_date = today_date.date()
+        return expiry == today_date
+    except Exception:
+        return False
+
+
+def _resolve_to_next_contract(cfg: Dict[str, Any], broker) -> bool:
+    """Switch the resolved instrument to the next month's futures contract.
+
+    Returns True on success, False if no next contract is available.
+    Temporarily sets expiry_mode=NEXT in the selector config so
+    select_nearest_futures picks candidates[1] (next expiry).
+    """
+    selector = cfg.setdefault("execution", {}).setdefault("instrument_selector", {})
+    prev_expiry_mode = selector.get("expiry_mode", "NEAREST")
+    try:
+        selector["expiry_mode"] = "NEXT"
+        selected = select_nearest_futures(cfg, force_master_refresh=True)
+        apply_execution_instrument(cfg, selected)
+        if broker is not None and hasattr(broker, "set_execution_instrument"):
+            broker.set_execution_instrument(selected.to_dict())
+        print(f"[EXPIRY] Rolled over to next contract: {selected.tradingsymbol} | Token: {selected.symboltoken}")
+        return True
+    except Exception as exc:
+        print(f"[EXPIRY] Could not resolve next contract: {exc}")
+        return False
+    finally:
+        selector["expiry_mode"] = prev_expiry_mode
+
+
+def _override_summary_flat(out_dir: Path, summary: Dict[str, Any], note: str) -> Dict[str, Any]:
+    """Write a FLAT position override to the live_latest_summary.json and return the updated dict."""
+    updated = dict(summary)
+    updated["current_position"] = "FLAT"
+    updated["open_points"] = 0.0
+    updated["current_entry_price"] = None
+    updated["current_entry_time"] = None
+    updated["expiry_note"] = note
+    serializable = {k: (str(v) if isinstance(v, (pd.Timestamp, datetime)) else v) for k, v in updated.items()}
+    (out_dir / "live_latest_summary.json").write_text(json.dumps(serializable, indent=2, default=str), encoding="utf-8")
+    return updated
+
+
 def _resolve_execution_instrument_if_needed(cfg: Dict[str, Any], broker=None) -> None:
     """Resolve the tradeable NFO instrument at startup.
 
@@ -594,6 +661,16 @@ def run_live(cfg: Dict[str, Any]) -> None:
     broker.connect()
     print("AngelOne login successful.")
     _resolve_execution_instrument_if_needed(cfg, broker)
+
+    # Warn if the resolved futures contract expires today — operator should monitor
+    _startup_expiry_mgmt = cfg.get("expiry_management", {}) or {}
+    if bool(_startup_expiry_mgmt.get("enabled", True)):
+        _today = datetime.now(tz).date()
+        if _is_expiry_today(cfg, _today):
+            _exp = _get_resolved_expiry(cfg)
+            print(f"\n*** EXPIRY WARNING: today ({_today}) is the expiry day for the resolved contract (expiry: {_exp}). ***")
+            print("*** The engine will auto-exit open positions and roll to the next contract at the configured cutoff times. ***\n")
+
     execution_manager = ExecutionManager(cfg, broker, out_dir)
     execution_started = False
 
@@ -620,6 +697,17 @@ def run_live(cfg: Dict[str, Any]) -> None:
     next_fetch_due: Optional[pd.Timestamp] = None
     last_wait_print: Optional[pd.Timestamp] = None
     startup_signal_results_shown = False
+
+    # Expiry management state (reset each calendar day inside the loop)
+    expiry_mgmt = cfg.get("expiry_management", {}) or {}
+    expiry_enabled = bool(expiry_mgmt.get("enabled", True))
+    rollover_cutoff = _parse_clock(expiry_mgmt.get("rollover_cutoff_time"), "14:00")
+    force_exit_time = _parse_clock(expiry_mgmt.get("force_exit_time"), "15:15")
+    expiry_day_no_entry = bool(expiry_mgmt.get("expiry_day_no_entry", False))
+
+    expiry_rollover_done = False    # True after we've switched to the next contract
+    expiry_force_exit_done = False  # True after the 15:15 force-exit has fired
+    _last_expiry_check_date = None  # track date to reset flags daily
 
     while True:
         if pause_flag.exists():
@@ -697,6 +785,54 @@ def run_live(cfg: Dict[str, Any]) -> None:
 
         try:
             calc, signals, trades, summary = _reconstruct_from_broker(cfg, broker, now, out_dir, prefix="live_latest")
+
+            # --- Expiry day management -------------------------------------------
+            if expiry_enabled:
+                today_date = now.date()
+                # Reset per-day flags when the date rolls over
+                if _last_expiry_check_date != today_date:
+                    expiry_rollover_done = False
+                    expiry_force_exit_done = False
+                    _last_expiry_check_date = today_date
+
+                if _is_expiry_today(cfg, today_date):
+                    now_time = now.time().replace(tzinfo=None)
+                    is_open = summary.get("current_position", "FLAT") not in ("FLAT", "", None)
+
+                    # 1. Rollover cutoff: exit position and switch to next contract
+                    if not expiry_rollover_done and now_time >= rollover_cutoff:
+                        if is_open:
+                            print(f"[EXPIRY] Rollover cutoff {rollover_cutoff} reached. Exiting position before contract expiry.")
+                            execution_manager.exit_all("EXPIRY_ROLLOVER_EXIT")
+                            summary = _override_summary_flat(out_dir, summary, "expiry rollover exit")
+                        rolled = _resolve_to_next_contract(cfg, broker)
+                        if rolled:
+                            expiry_rollover_done = True
+                            # Re-instantiate execution manager against the new contract
+                            execution_manager = ExecutionManager(cfg, broker, out_dir)
+                            execution_started = False
+                        else:
+                            print("[EXPIRY] Warning: could not roll to next contract. Manual intervention may be needed.")
+
+                    # 2. Force-exit at final cutoff time (belt-and-suspenders)
+                    if not expiry_force_exit_done and now_time >= force_exit_time:
+                        is_still_open = summary.get("current_position", "FLAT") not in ("FLAT", "", None)
+                        if is_still_open:
+                            print(f"[EXPIRY] Force-exit time {force_exit_time} reached. Flattening remaining position.")
+                            execution_manager.exit_all("EXPIRY_FORCE_EXIT")
+                            summary = _override_summary_flat(out_dir, summary, "expiry force exit")
+                        expiry_force_exit_done = True
+
+                    # 3. Block new entries on expiry day if configured
+                    if expiry_day_no_entry:
+                        if summary.get("current_position", "FLAT") not in ("FLAT", "", None):
+                            pass  # already in a trade — let normal logic handle it
+                        else:
+                            # Suppress the signal so align_to_strategy won't open a new position
+                            summary = dict(summary)
+                            summary["current_position"] = "FLAT"
+            # --- End expiry day management ---------------------------------------
+
             latest_closed = calc["datetime"].max() if not calc.empty else None
             if latest_closed is not None and latest_closed != last_processed_candle:
                 last_processed_candle = latest_closed

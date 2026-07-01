@@ -70,6 +70,14 @@ market:
   auto_exit_after_market_close: false
   stay_alive_on_closed_day: true
   holidays: []
+expiry_management:
+  enabled: true
+  # On expiry day, exit open position and switch to next month's contract after this time
+  rollover_cutoff_time: '14:00'
+  # On expiry day, force-flatten any remaining open position at this time (last resort)
+  force_exit_time: '15:15'
+  # Block ALL new entries on expiry day (set true for conservative trading)
+  expiry_day_no_entry: false
 broker:
   name: angelone
   angelone:
