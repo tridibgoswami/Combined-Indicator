@@ -668,8 +668,11 @@ def run_live(cfg: Dict[str, Any]) -> None:
         _today = datetime.now(tz).date()
         if _is_expiry_today(cfg, _today):
             _exp = _get_resolved_expiry(cfg)
+            _em = cfg.get("expiry_management", {}) or {}
+            _rt = _em.get("rollover_time", "15:00")
+            _ft = _em.get("force_exit_time", "15:25")
             print(f"\n*** EXPIRY WARNING: today ({_today}) is the expiry day for the resolved contract (expiry: {_exp}). ***")
-            print("*** The engine will auto-exit open positions and roll to the next contract at the configured cutoff times. ***\n")
+            print(f"*** Rollover trade at {_rt} | Hard force-exit at {_ft} if still open. ***\n")
 
     execution_manager = ExecutionManager(cfg, broker, out_dir)
     execution_started = False
@@ -698,16 +701,17 @@ def run_live(cfg: Dict[str, Any]) -> None:
     last_wait_print: Optional[pd.Timestamp] = None
     startup_signal_results_shown = False
 
-    # Expiry management state (reset each calendar day inside the loop)
+    # Expiry management state (flags reset each calendar day inside the loop)
     expiry_mgmt = cfg.get("expiry_management", {}) or {}
     expiry_enabled = bool(expiry_mgmt.get("enabled", True))
-    rollover_cutoff = _parse_clock(expiry_mgmt.get("rollover_cutoff_time"), "14:00")
-    force_exit_time = _parse_clock(expiry_mgmt.get("force_exit_time"), "15:15")
-    expiry_day_no_entry = bool(expiry_mgmt.get("expiry_day_no_entry", False))
+    expiry_rollover_time = _parse_clock(expiry_mgmt.get("rollover_time"), "15:00")
+    expiry_force_exit_time = _parse_clock(expiry_mgmt.get("force_exit_time"), "15:25")
 
-    expiry_rollover_done = False    # True after we've switched to the next contract
-    expiry_force_exit_done = False  # True after the 15:15 force-exit has fired
-    _last_expiry_check_date = None  # track date to reset flags daily
+    # Per-day flags — reset when date changes
+    expiry_instrument_switched = False  # True once we've moved to next-month contract
+    expiry_rollover_done = False         # True after rollover trade (exit near + re-enter far)
+    expiry_force_exit_done = False       # True after hard force-exit
+    _last_expiry_check_date = None
 
     while True:
         if pause_flag.exists():
@@ -789,48 +793,72 @@ def run_live(cfg: Dict[str, Any]) -> None:
             # --- Expiry day management -------------------------------------------
             if expiry_enabled:
                 today_date = now.date()
-                # Reset per-day flags when the date rolls over
+                # Reset per-day flags on date change
                 if _last_expiry_check_date != today_date:
+                    expiry_instrument_switched = False
                     expiry_rollover_done = False
                     expiry_force_exit_done = False
                     _last_expiry_check_date = today_date
 
                 if _is_expiry_today(cfg, today_date):
                     now_time = now.time().replace(tzinfo=None)
-                    is_open = summary.get("current_position", "FLAT") not in ("FLAT", "", None)
+                    current_pos = summary.get("current_position", "FLAT")
+                    is_open = current_pos not in ("FLAT", "", None)
 
-                    # 1. Rollover cutoff: exit position and switch to next contract
-                    if not expiry_rollover_done and now_time >= rollover_cutoff:
-                        if is_open:
-                            print(f"[EXPIRY] Rollover cutoff {rollover_cutoff} reached. Exiting position before contract expiry.")
-                            execution_manager.exit_all("EXPIRY_ROLLOVER_EXIT")
-                            summary = _override_summary_flat(out_dir, summary, "expiry rollover exit")
-                        rolled = _resolve_to_next_contract(cfg, broker)
-                        if rolled:
-                            expiry_rollover_done = True
-                            # Re-instantiate execution manager against the new contract
+                    # Step 1 — Switch to next-month at the start of expiry day if FLAT.
+                    # New signals from this point will trade on the next-month contract.
+                    # If we're holding a position, we stay on the near-month until rollover
+                    # at rollover_time so that the exit order hits the correct contract.
+                    if not expiry_instrument_switched and not is_open:
+                        print(f"[EXPIRY] Position is flat at start of expiry day. Switching instrument to next-month contract now.")
+                        switched = _resolve_to_next_contract(cfg, broker)
+                        if switched:
+                            expiry_instrument_switched = True
+                            expiry_rollover_done = True  # nothing to roll, already on next-month
                             execution_manager = ExecutionManager(cfg, broker, out_dir)
                             execution_started = False
-                        else:
-                            print("[EXPIRY] Warning: could not roll to next contract. Manual intervention may be needed.")
 
-                    # 2. Force-exit at final cutoff time (belt-and-suspenders)
-                    if not expiry_force_exit_done and now_time >= force_exit_time:
+                    # Step 2 — Rollover trade at rollover_time (default 15:00).
+                    # Exit near-month position and immediately re-enter same direction
+                    # on the next-month contract so the trend carry-forward continues.
+                    if not expiry_rollover_done and now_time >= expiry_rollover_time:
+                        if is_open:
+                            print(f"[EXPIRY] Rollover time {expiry_rollover_time}: exiting {current_pos} on near-month contract.")
+                            execution_manager.exit_all("EXPIRY_ROLLOVER_EXIT")
+                            # Switch to next-month contract BEFORE re-entry
+                            switched = _resolve_to_next_contract(cfg, broker)
+                            if switched:
+                                expiry_instrument_switched = True
+                                # Fresh manager with clean idempotency so re-entry is not blocked
+                                execution_manager = ExecutionManager(cfg, broker, out_dir)
+                                execution_started = True
+                                # Re-enter same direction on next-month (summary still shows original
+                                # direction — fresh manager sees desired=LONG/SHORT, actual=FLAT → enters)
+                                print(f"[EXPIRY] Re-entering {current_pos} on next-month contract (trend continuation).")
+                                execution_manager.align_to_strategy(summary, reason="EXPIRY_ROLLOVER_REENTRY")
+                            else:
+                                print("[EXPIRY] Warning: could not resolve next-month contract. No re-entry placed.")
+                            summary = _override_summary_flat(out_dir, summary, "expiry rollover complete")
+                        else:
+                            # FLAT at rollover time — just switch contract if not already done
+                            if not expiry_instrument_switched:
+                                switched = _resolve_to_next_contract(cfg, broker)
+                                if switched:
+                                    expiry_instrument_switched = True
+                                    execution_manager = ExecutionManager(cfg, broker, out_dir)
+                                    execution_started = False
+                        expiry_rollover_done = True
+
+                    # Step 3 — Hard force-exit at force_exit_time (default 15:25).
+                    # Belt-and-suspenders: if rollover somehow failed and position is
+                    # still open on near-month, exit immediately. No re-entry this late.
+                    if not expiry_force_exit_done and now_time >= expiry_force_exit_time:
                         is_still_open = summary.get("current_position", "FLAT") not in ("FLAT", "", None)
                         if is_still_open:
-                            print(f"[EXPIRY] Force-exit time {force_exit_time} reached. Flattening remaining position.")
+                            print(f"[EXPIRY] Force-exit time {expiry_force_exit_time}: flattening remaining near-month position (no re-entry).")
                             execution_manager.exit_all("EXPIRY_FORCE_EXIT")
                             summary = _override_summary_flat(out_dir, summary, "expiry force exit")
                         expiry_force_exit_done = True
-
-                    # 3. Block new entries on expiry day if configured
-                    if expiry_day_no_entry:
-                        if summary.get("current_position", "FLAT") not in ("FLAT", "", None):
-                            pass  # already in a trade — let normal logic handle it
-                        else:
-                            # Suppress the signal so align_to_strategy won't open a new position
-                            summary = dict(summary)
-                            summary["current_position"] = "FLAT"
             # --- End expiry day management ---------------------------------------
 
             latest_closed = calc["datetime"].max() if not calc.empty else None

@@ -72,12 +72,11 @@ market:
   holidays: []
 expiry_management:
   enabled: true
-  # On expiry day, exit open position and switch to next month's contract after this time
-  rollover_cutoff_time: '14:00'
-  # On expiry day, force-flatten any remaining open position at this time (last resort)
-  force_exit_time: '15:15'
-  # Block ALL new entries on expiry day (set true for conservative trading)
-  expiry_day_no_entry: false
+  # On expiry day at this time: exit near-month position and re-enter same direction
+  # on next month's contract to continue riding the trend (rollover trade)
+  rollover_time: '15:00'
+  # Last-resort hard exit if position is still open after rollover_time (no re-entry)
+  force_exit_time: '15:25'
 broker:
   name: angelone
   angelone:
