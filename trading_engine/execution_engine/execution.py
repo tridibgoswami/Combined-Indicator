@@ -69,18 +69,36 @@ class ExecutionManager:
         self.exit_all_flag = control_dir / "EXIT_ALL_REQUESTED"
 
     def _ensure_order_log(self) -> None:
-        if self.order_log.exists():
-            return
         self.order_log.parent.mkdir(parents=True, exist_ok=True)
+        if self.order_log.exists():
+            # Migrate legacy files that are missing the ltp column
+            with self.order_log.open("r", encoding="utf-8") as f:
+                first = f.readline()
+            if "ltp" not in first:
+                import tempfile, shutil
+                tmp = self.order_log.with_suffix(".tmp")
+                with self.order_log.open("r", encoding="utf-8") as src, tmp.open("w", newline="", encoding="utf-8") as dst:
+                    reader = csv.DictReader(src)
+                    writer = csv.DictWriter(dst, fieldnames=[
+                        "datetime", "mode", "instrument_mode", "action", "side", "quantity",
+                        "tradingsymbol", "symboltoken", "exchange", "from_position", "to_position",
+                        "reason", "ltp", "broker_response",
+                    ])
+                    writer.writeheader()
+                    for row in reader:
+                        row.setdefault("ltp", "")
+                        writer.writerow(row)
+                shutil.move(str(tmp), str(self.order_log))
+            return
         with self.order_log.open("w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow([
                 "datetime", "mode", "instrument_mode", "action", "side", "quantity",
                 "tradingsymbol", "symboltoken", "exchange", "from_position", "to_position",
-                "reason", "broker_response",
+                "reason", "ltp", "broker_response",
             ])
 
-    def _log_order(self, action: str, side: str, quantity: int, from_pos: int, to_pos: int, reason: str, response: Any, instrument: Dict[str, Any] | None = None) -> None:
+    def _log_order(self, action: str, side: str, quantity: int, from_pos: int, to_pos: int, reason: str, response: Any, instrument: Dict[str, Any] | None = None, ltp: float | None = None) -> None:
         instrument = instrument or {}
         with self.order_log.open("a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
@@ -97,6 +115,7 @@ class ExecutionManager:
                 from_pos,
                 to_pos,
                 reason,
+                ltp if ltp is not None else "",
                 str(response),
             ])
 
@@ -164,25 +183,42 @@ class ExecutionManager:
             self.state.position = desired
             self.state.startup_synced = True
 
+    def _execution_ltp(self) -> float | None:
+        """Fetch the live LTP for the execution instrument (futures contract)."""
+        try:
+            if hasattr(self.broker, "ltp"):
+                return float(self.broker.ltp(execution=True))
+        except Exception:
+            pass
+        return None
+
     def _send(self, side: str, quantity: int, from_pos: int, to_pos: int, reason: str, instrument: Dict[str, Any] | None = None) -> Any:
         if quantity <= 0:
             return {"status": False, "message": "quantity <= 0"}
+        ltp: float | None = None
         if self.mode == "PAPER":
+            ltp = self._execution_ltp()
             response = {
                 "status": True,
                 "paper": True,
                 "side": side,
                 "quantity": quantity,
                 "reason": reason,
+                "ltp": ltp,
                 "instrument": instrument or (self.cfg.get("execution", {}) or {}).get("resolved_instrument", {}),
             }
         else:
             if not self.allow_live_orders:
                 raise RuntimeError("LIVE execution requested but execution.allow_live_orders=false")
             response = self.broker.place_order(side, quantity, instrument=instrument)
-        self._log_order("ORDER", side, quantity, from_pos, to_pos, reason, response, instrument)
+            # For LIVE orders the broker response contains the fill price; try to extract it.
+            try:
+                ltp = float(response.get("ltp") or response.get("price") or 0) or None
+            except (TypeError, ValueError):
+                ltp = None
+        self._log_order("ORDER", side, quantity, from_pos, to_pos, reason, response, instrument, ltp=ltp)
         sym = (instrument or {}).get("tradingsymbol", "RESOLVED")
-        print(f"ORDER [{self.mode}/{self.instrument_mode}] {side} {sym} qty={quantity} | {from_pos} -> {to_pos} | reason={reason} | response={response}")
+        print(f"ORDER [{self.mode}/{self.instrument_mode}] {side} {sym} qty={quantity} | {from_pos} -> {to_pos} | reason={reason} | ltp={ltp} | response={response}")
         return response
 
     def _underlying_ltp(self) -> float:
