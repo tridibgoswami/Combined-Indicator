@@ -22,17 +22,33 @@ def get_orders() -> list[dict[str, Any]]:
     return _read_csv("orders.csv")
 
 
+def _most_recent_path(*names: str) -> Path | None:
+    """Return the most recently modified file among the given names in OUTPUTS_DIR."""
+    existing = [OUTPUTS_DIR / n for n in names if (OUTPUTS_DIR / n).exists()]
+    if not existing:
+        return None
+    return max(existing, key=lambda p: p.stat().st_mtime)
+
+
 def get_live_signals() -> list[dict[str, Any]]:
-    return _read_csv("live_latest_signals.csv")
+    path = _most_recent_path("live_latest_signals.csv", "live_postmarket_signals.csv")
+    if path is None:
+        return []
+    with path.open(encoding="utf-8") as f:
+        return list(csv.DictReader(f))
 
 
 def get_live_trades() -> list[dict[str, Any]]:
-    return _read_csv("live_latest_trades.csv")
+    path = _most_recent_path("live_latest_trades.csv", "live_postmarket_trades.csv")
+    if path is None:
+        return []
+    with path.open(encoding="utf-8") as f:
+        return list(csv.DictReader(f))
 
 
 def get_summary() -> dict[str, Any]:
-    path = OUTPUTS_DIR / "live_latest_summary.json"
-    if not path.exists():
+    path = _most_recent_path("live_latest_summary.json", "live_postmarket_summary.json")
+    if path is None:
         return {}
     return json.loads(path.read_text(encoding="utf-8"))
 
