@@ -29,11 +29,25 @@ export default function Nav() {
 
   return (
     <nav style={{ display: "flex", flexWrap: "wrap", gap: 12, padding: 12, borderBottom: "1px solid #2a2f36" }}>
-      {LINKS.map((l) => (
-        <Link key={l.href} href={l.href} style={{ color: "#9fd3ff", textDecoration: "none", fontSize: 14 }}>
-          {l.label}
-        </Link>
-      ))}
+      {LINKS.map((l) => {
+        const active = router.pathname === l.href;
+        return (
+          <Link
+            key={l.href}
+            href={l.href}
+            style={{
+              color: active ? "#ffffff" : "#9fd3ff",
+              textDecoration: "none",
+              fontSize: 14,
+              fontWeight: active ? 700 : 400,
+              borderBottom: active ? "2px solid #ffffff" : "2px solid transparent",
+              paddingBottom: 2,
+            }}
+          >
+            {l.label}
+          </Link>
+        );
+      })}
       {loggedIn ? (
         <button
           onClick={logout}

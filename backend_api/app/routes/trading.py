@@ -22,10 +22,12 @@ def broker_status(user: User = Depends(get_current_user)):
 @router.get("/positions")
 def positions(user: User = Depends(get_current_user)):
     summary = outputs_service.get_summary()
+    entry_time = summary.get("current_entry_time")
     return {
         "current_position": summary.get("current_position", "FLAT"),
-        "entry_price": summary.get("current_entry_price"),
-        "entry_time": summary.get("current_entry_time"),
+        "entry_spot_price": summary.get("current_entry_price"),
+        "entry_futures_price": outputs_service._futures_price_near(entry_time or "", entry=True),
+        "entry_time": entry_time,
         "open_points": summary.get("open_points", 0),
     }
 
@@ -43,6 +45,11 @@ def signals(user: User = Depends(get_current_user)):
 @router.get("/trades")
 def trades(user: User = Depends(get_current_user)):
     return outputs_service.get_live_trades()
+
+
+@router.get("/last-trade")
+def last_trade(user: User = Depends(get_current_user)):
+    return outputs_service.get_last_closed_trade()
 
 
 @router.get("/pnl")

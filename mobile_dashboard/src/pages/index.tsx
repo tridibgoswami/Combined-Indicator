@@ -8,24 +8,24 @@ export default function Dashboard() {
   const [brokerStatus, setBrokerStatus] = useState<any>(null);
   const [position, setPosition] = useState<any>(null);
   const [pnl, setPnl] = useState<any>(null);
-  const [signals, setSignals] = useState<any[]>([]);
+  const [lastTrade, setLastTrade] = useState<any>(null);
   const [offline, setOffline] = useState(false);
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [engine, broker, pos, pnlData, sig] = await Promise.allSettled([
+        const [engine, broker, pos, pnlData, lt] = await Promise.allSettled([
           apiFetch("/engine/status"),
           apiFetch("/broker/status"),
           apiFetch("/positions"),
           apiFetch("/pnl"),
-          apiFetch("/signals"),
+          apiFetch("/last-trade"),
         ]);
         setEngineStatus(engine.status === "fulfilled" ? engine.value : null);
         setBrokerStatus(broker.status === "fulfilled" ? broker.value : null);
         setPosition(pos.status === "fulfilled" ? pos.value : null);
         setPnl(pnlData.status === "fulfilled" ? pnlData.value : null);
-        setSignals(sig.status === "fulfilled" ? sig.value.slice(-1) : []);
+        setLastTrade(lt.status === "fulfilled" ? lt.value : null);
         setOffline(false);
       } catch {
         setOffline(true);
@@ -36,7 +36,6 @@ export default function Dashboard() {
     return () => clearInterval(id);
   }, []);
 
-  const lastSignal = signals[0];
   const isFlat = !position || position.current_position === "FLAT" || !position.current_position;
 
   return (
@@ -69,17 +68,21 @@ export default function Dashboard() {
           )}
         </Card>
 
-        <Card emoji={isFlat ? "⚪" : position.current_position === "LONG" ? "🟢" : "🔴"} title="Current Position">
+        <Card emoji={isFlat ? "⚪" : position.current_position === "LONG" ? "🟢" : "🔴"} title="Current Open Position">
           {!isFlat ? (
             <>
               <Row label="Open position" value={<Badge>{position.current_position}</Badge>} />
-              <Row label="Entry price" value={fmtNum(position.entry_price)} />
-              <Row label="Entry time" value={position.entry_time || "-"} />
+              <Row label="Entry spot price" value={fmtNum(position.entry_spot_price)} />
+              <Row
+                label="Entry futures price"
+                value={position.entry_futures_price != null ? fmtNum(position.entry_futures_price) : "—"}
+              />
+              <Row label="Entry time" value={position.entry_time || "—"} />
               <Row
                 label="Open points"
                 value={<span style={{ color: pointsColor(position.open_points) }}>{fmtNum(position.open_points)}</span>}
               />
-              {pnl && !isFlat && (
+              {pnl && (
                 <Row
                   label="Open PnL (₹)"
                   value={<span style={{ color: pointsColor(pnl.open_pnl) }}>₹{fmtNum(pnl.open_pnl)}</span>}
@@ -91,27 +94,31 @@ export default function Dashboard() {
           )}
         </Card>
 
-        <Card emoji="💰" title="Session PnL (Realized)">
-          {pnl ? (
-            <Row
-              label="Net points"
-              value={<span style={{ color: pointsColor(pnl.net_points) }}>{fmtNum(pnl.net_points)}</span>}
-            />
-          ) : (
-            <Empty />
-          )}
-        </Card>
-
-        <Card emoji="📡" title="Last Signal">
-          {lastSignal ? (
+        <Card emoji="📋" title="Last Trade Status">
+          {lastTrade ? (
             <>
-              <Row label="Signal" value={<Badge>{lastSignal.signal}</Badge>} />
-              <Row label="Price" value={fmtNum(lastSignal.price)} />
-              <Row label="Time" value={lastSignal.datetime || "-"} />
-              {lastSignal.is_chop !== undefined && <Row label="Chop filtered" value={String(lastSignal.is_chop)} />}
+              <Row label="Signal" value={<Badge>{lastTrade.signal}</Badge>} />
+              <Row
+                label="Entry futures price"
+                value={lastTrade.entry_futures_price != null ? fmtNum(lastTrade.entry_futures_price) : fmtNum(lastTrade.entry_spot_price)}
+              />
+              <Row
+                label="Exit futures price"
+                value={lastTrade.exit_futures_price != null ? fmtNum(lastTrade.exit_futures_price) : fmtNum(lastTrade.exit_spot_price)}
+              />
+              <Row label="Entry time" value={lastTrade.entry_time || "—"} />
+              <Row
+                label="Points"
+                value={<span style={{ color: pointsColor(lastTrade.points) }}>{fmtNum(lastTrade.points)}</span>}
+              />
+              <Row
+                label="Final PnL (₹)"
+                value={<span style={{ color: pointsColor(lastTrade.final_pnl) }}>₹{fmtNum(lastTrade.final_pnl)}</span>}
+              />
+              {lastTrade.exit_reason && <Row label="Exit reason" value={lastTrade.exit_reason} />}
             </>
           ) : (
-            <Empty text="No signals yet" />
+            <Empty text="No closed trades yet" />
           )}
         </Card>
       </div>
