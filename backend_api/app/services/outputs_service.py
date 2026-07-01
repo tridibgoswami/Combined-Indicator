@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -58,9 +59,21 @@ def _futures_price_near(target_time: str, entry: bool) -> float | None:
         candidates.append(o)
     if not candidates:
         return None
-    # Pick the order whose datetime string is closest to target_time (lexicographic
-    # comparison works for ISO-format timestamps with consistent timezone notation).
-    best = min(candidates, key=lambda o: abs(hash(o["datetime"]) - hash(target_time)))
+
+    def _to_naive_dt(s: str) -> datetime:
+        # Take first 19 chars "YYYY-MM-DD HH:MM:SS" — ignores timezone but is
+        # consistent across all rows so relative comparison is correct.
+        try:
+            return datetime.strptime(str(s).strip()[:19], "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            pass
+        try:
+            return datetime.strptime(str(s).strip()[:19], "%Y-%m-%dT%H:%M:%S")
+        except ValueError:
+            return datetime.min
+
+    target_dt = _to_naive_dt(target_time)
+    best = min(candidates, key=lambda o: abs((_to_naive_dt(o.get("datetime", "")) - target_dt).total_seconds()))
     try:
         return float(best["ltp"])
     except (ValueError, TypeError):
