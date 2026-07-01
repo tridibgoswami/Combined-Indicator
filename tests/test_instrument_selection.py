@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
 from unittest.mock import patch
 
 import pandas as pd
 
 from trading_engine.instrument_selector import instrument_selector as inst
+
+
+def _future_expiry_str() -> str:
+    """Return an expiry string ~30 days out so fake rows are never filtered as expired."""
+    d = date.today() + timedelta(days=30)
+    return d.strftime("%d%b%Y").upper()  # e.g. "31JUL2026"
 
 
 def _option_row(symbol: str, strike: float, expiry: str, token: str) -> dict:
@@ -21,10 +28,11 @@ def _option_row(symbol: str, strike: float, expiry: str, token: str) -> dict:
 
 
 def _fake_rows():
+    expiry = _future_expiry_str()
     rows = []
     for strike in [49500, 49600, 49700, 49800, 49900, 50000, 50100, 50200, 50300, 50400, 50500]:
-        rows.append(_option_row(f"BANKNIFTY30JUN2026{strike}CE", strike, "30JUN2026", f"CE{strike}"))
-        rows.append(_option_row(f"BANKNIFTY30JUN2026{strike}PE", strike, "30JUN2026", f"PE{strike}"))
+        rows.append(_option_row(f"BANKNIFTY{expiry}{strike}CE", strike, expiry, f"CE{strike}"))
+        rows.append(_option_row(f"BANKNIFTY{expiry}{strike}PE", strike, expiry, f"PE{strike}"))
     return rows
 
 
@@ -74,18 +82,18 @@ def test_option_selling_bull_put_spread_hedge_is_lower_strike(_mock):
 
 @patch.object(inst, "load_scrip_master", return_value=_fake_rows())
 def test_select_nearest_futures_requires_matching_underlying(_mock):
+    expiry = _future_expiry_str()
     futures_rows = [
         {
             "exch_seg": "NFO", "instrumenttype": "FUTIDX", "name": "BANKNIFTY",
-            "symbol": "BANKNIFTY30JUN2026FUT", "token": "FUT1",
-            "expiry": "30JUN2026", "lotsize": "30",
+            "symbol": f"BANKNIFTY{expiry}FUT", "token": "FUT1",
+            "expiry": expiry, "lotsize": "30",
         }
     ]
     with patch.object(inst, "load_scrip_master", return_value=futures_rows):
         selected = inst.select_nearest_futures(
             {"execution": {"underlying": "BANKNIFTY", "exchange": "NFO", "instrument_type": "FUTIDX"},
              "engine": {"timezone": "Asia/Kolkata"}},
-            now=pd.Timestamp("2026-06-01", tz="Asia/Kolkata"),
         )
-    assert selected.tradingsymbol == "BANKNIFTY30JUN2026FUT"
+    assert selected.tradingsymbol == f"BANKNIFTY{expiry}FUT"
     assert selected.lot_size == 30
