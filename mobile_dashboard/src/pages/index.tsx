@@ -98,15 +98,17 @@ export default function Dashboard() {
           {lastTrade ? (
             <>
               <Row label="Signal" value={<Badge>{lastTrade.signal}</Badge>} />
+              <Row label="Entry time" value={lastTrade.entry_time || "—"} />
+              <Row label="Entry spot price" value={fmtNum(lastTrade.entry_spot_price)} />
               <Row
                 label="Entry futures price"
-                value={lastTrade.entry_futures_price != null ? fmtNum(lastTrade.entry_futures_price) : fmtNum(lastTrade.entry_spot_price)}
+                value={lastTrade.entry_futures_price != null ? fmtNum(lastTrade.entry_futures_price) : "—"}
               />
+              <Row label="Exit spot price" value={fmtNum(lastTrade.exit_spot_price)} />
               <Row
                 label="Exit futures price"
-                value={lastTrade.exit_futures_price != null ? fmtNum(lastTrade.exit_futures_price) : fmtNum(lastTrade.exit_spot_price)}
+                value={lastTrade.exit_futures_price != null ? fmtNum(lastTrade.exit_futures_price) : "—"}
               />
-              <Row label="Entry time" value={lastTrade.entry_time || "—"} />
               <Row
                 label="Points"
                 value={<span style={{ color: pointsColor(lastTrade.points) }}>{fmtNum(lastTrade.points)}</span>}
