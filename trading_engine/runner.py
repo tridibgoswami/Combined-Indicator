@@ -504,6 +504,55 @@ def _warmup_start(now: pd.Timestamp, cfg: Dict[str, Any]) -> pd.Timestamp:
     return now - pd.Timedelta(days=days)
 
 
+def _futures_candle_close(fdf: pd.DataFrame, ts) -> float | None:
+    """Return the futures candle close price nearest to ts, or None."""
+    if fdf is None or fdf.empty or ts is None:
+        return None
+    try:
+        target = pd.Timestamp(ts)
+        if target.tzinfo is None:
+            target = target.tz_localize(fdf["datetime"].iloc[0].tzinfo)
+        diffs = (fdf["datetime"] - target).abs()
+        idx = diffs.idxmin()
+        return float(fdf.loc[idx, "close"])
+    except Exception:
+        return None
+
+
+def _enrich_futures_prices(trades: pd.DataFrame, summary: dict, fdf: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    """Inject entry_futures_price / exit_futures_price into trades and summary."""
+    if fdf is None or fdf.empty:
+        return trades, summary
+
+    if not trades.empty:
+        if "entry_futures_price" not in trades.columns:
+            trades = trades.copy()
+            trades["entry_futures_price"] = None
+            trades["exit_futures_price"] = None
+        for idx, row in trades.iterrows():
+            if pd.isna(trades.at[idx, "entry_futures_price"]) or trades.at[idx, "entry_futures_price"] is None:
+                ep = _futures_candle_close(fdf, row.get("entry_time"))
+                if ep is not None:
+                    trades.at[idx, "entry_futures_price"] = ep
+            status = str(row.get("status", "")).upper()
+            exit_t = row.get("exit_time")
+            if exit_t and str(exit_t) != "OPEN" and status == "CLOSED":
+                if pd.isna(trades.at[idx, "exit_futures_price"]) or trades.at[idx, "exit_futures_price"] is None:
+                    xp = _futures_candle_close(fdf, exit_t)
+                    if xp is not None:
+                        trades.at[idx, "exit_futures_price"] = xp
+
+    # Enrich summary with current open position entry futures price
+    if summary.get("current_position", "FLAT") not in ("FLAT", "", None):
+        entry_t = summary.get("current_entry_time")
+        fp = _futures_candle_close(fdf, entry_t)
+        if fp is not None:
+            summary = dict(summary)
+            summary["entry_futures_price"] = fp
+
+    return trades, summary
+
+
 def _reconstruct_from_broker(cfg: Dict[str, Any], broker, now: pd.Timestamp, out_dir: Path, prefix: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, Any]]:
     instr = cfg.get("instrument", {}) or {}
     start_dt = _warmup_start(now, cfg).to_pydatetime()
@@ -512,6 +561,16 @@ def _reconstruct_from_broker(cfg: Dict[str, Any], broker, now: pd.Timestamp, out
     df = _drop_unclosed_last_candle(df, broker.interval_minutes, now)
     calc = calculate_pine_replica(df, cfg)
     signals, trades, summary = build_trades(calc, cfg)
+
+    # Fetch futures candles and inject prices into trades and summary
+    fdf = None
+    if hasattr(broker, "get_futures_candles"):
+        try:
+            fdf = broker.get_futures_candles(start_dt, now.to_pydatetime())
+        except Exception:
+            fdf = None
+    trades, summary = _enrich_futures_prices(trades, summary, fdf)
+
     write_outputs(out_dir, calc, signals, trades, summary, prefix=prefix)
     return calc, signals, trades, summary
 

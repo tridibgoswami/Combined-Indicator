@@ -96,8 +96,17 @@ def _futures_price_near(target_time: str, entry: bool) -> float | None:
         return None
 
 
+def _parse_float(val) -> float | None:
+    if val is None or val == "" or str(val).upper() in ("NONE", "NAN", "OPEN"):
+        return None
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return None
+
+
 def get_last_closed_trade() -> dict[str, Any] | None:
-    """Return the most recent CLOSED trade enriched with futures prices from orders.csv."""
+    """Return the most recent CLOSED trade with futures prices read from trades CSV (set by engine)."""
     from backend_api.app.services.config_service import read_config
 
     trades = get_live_trades()
@@ -121,12 +130,16 @@ def get_last_closed_trade() -> dict[str, Any] | None:
         except (ValueError, TypeError):
             pnl_value = points * lot_size * lots
 
+    # Prefer futures prices written by engine into trades CSV; fall back to orders.csv lookup
+    entry_fp = _parse_float(last.get("entry_futures_price")) or _futures_price_near(last.get("entry_time", ""), entry=True)
+    exit_fp = _parse_float(last.get("exit_futures_price")) or _futures_price_near(last.get("exit_time", ""), entry=False)
+
     return {
         "signal": last.get("entry_signal"),
         "entry_spot_price": last.get("entry_price"),
         "exit_spot_price": last.get("exit_price"),
-        "entry_futures_price": _futures_price_near(last.get("entry_time", ""), entry=True),
-        "exit_futures_price": _futures_price_near(last.get("exit_time", ""), entry=False),
+        "entry_futures_price": entry_fp,
+        "exit_futures_price": exit_fp,
         "entry_time": last.get("entry_time"),
         "exit_time": last.get("exit_time"),
         "points": points,

@@ -97,6 +97,32 @@ class AngelOneBroker:
         df = pd.DataFrame(rows, columns=["datetime", "open", "high", "low", "close", "volume"])
         return normalize_ohlc(df, self.cfg.get("engine", {}).get("timezone", "Asia/Kolkata"))
 
+    def get_futures_candles(self, start_dt: datetime, end_dt: datetime) -> pd.DataFrame:
+        """Fetch OHLCV candles for the execution (futures) instrument."""
+        if self.obj is None:
+            self.connect()
+        exe = self.execution_instrument or {}
+        exchange = exe.get("exchange") or "NFO"
+        symboltoken = str(exe.get("symboltoken") or "")
+        if not symboltoken:
+            return pd.DataFrame()
+        params = {
+            "exchange": exchange,
+            "symboltoken": symboltoken,
+            "interval": self.settings.interval,
+            "fromdate": start_dt.strftime("%Y-%m-%d %H:%M"),
+            "todate": end_dt.strftime("%Y-%m-%d %H:%M"),
+        }
+        try:
+            res = self.obj.getCandleData(params)
+        except Exception:
+            return pd.DataFrame()
+        if not res or not res.get("status"):
+            return pd.DataFrame()
+        rows = res.get("data") or []
+        df = pd.DataFrame(rows, columns=["datetime", "open", "high", "low", "close", "volume"])
+        return normalize_ohlc(df, self.cfg.get("engine", {}).get("timezone", "Asia/Kolkata"))
+
     def place_order(self, side: str, quantity: int, instrument: Optional[Dict[str, Any]] = None) -> Any:
         if self.obj is None:
             self.connect()

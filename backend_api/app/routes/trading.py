@@ -23,10 +23,13 @@ def broker_status(user: User = Depends(get_current_user)):
 def positions(user: User = Depends(get_current_user)):
     summary = outputs_service.get_summary()
     entry_time = summary.get("current_entry_time")
+    # Prefer entry_futures_price written by engine into summary; fall back to orders.csv lookup
+    entry_fp = outputs_service._parse_float(summary.get("entry_futures_price")) \
+        or outputs_service._futures_price_near(entry_time or "", entry=True)
     return {
         "current_position": summary.get("current_position", "FLAT"),
         "entry_spot_price": summary.get("current_entry_price"),
-        "entry_futures_price": outputs_service._futures_price_near(entry_time or "", entry=True),
+        "entry_futures_price": entry_fp,
         "entry_time": entry_time,
         "open_points": summary.get("open_points", 0),
     }
