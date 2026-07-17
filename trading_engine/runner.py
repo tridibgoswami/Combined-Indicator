@@ -567,8 +567,12 @@ def _reconstruct_from_broker(cfg: Dict[str, Any], broker, now: pd.Timestamp, out
     if hasattr(broker, "get_futures_candles"):
         try:
             fdf = broker.get_futures_candles(start_dt, now.to_pydatetime())
-        except Exception:
+            print(f"[FUTURES] Fetched {len(fdf)} candles for futures instrument (start={start_dt.strftime('%Y-%m-%d')}).")
+        except Exception as exc:
+            print(f"[FUTURES] get_futures_candles failed: {exc}")
             fdf = None
+    else:
+        print("[FUTURES] broker has no get_futures_candles method — old image?")
     trades, summary = _enrich_futures_prices(trades, summary, fdf)
 
     write_outputs(out_dir, calc, signals, trades, summary, prefix=prefix)
