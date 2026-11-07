@@ -17,13 +17,37 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--force-refresh", action="store_true", help="Ignore cache and re-download broker candles for requested range.")
     parser.add_argument("--mae-points", type=float, help="Enable FIXED_POINTS MAE exit for this run, e.g. --mae-points 400")
     parser.add_argument("--disable-mae", action="store_true", help="Disable MAE exit for this run even if config enables it.")
+    parser.add_argument("--interval", help="Candle timeframe override for this run: 1, 3, 5, 10, 15, 30, 60 (minutes) or an AngelOne name like ONE_MINUTE")
     parser.add_argument("--config", default="config/config.yaml", help="Config YAML path")
     return parser.parse_args()
+
+
+INTERVAL_NAMES = {
+    "1": "ONE_MINUTE",
+    "3": "THREE_MINUTE",
+    "5": "FIVE_MINUTE",
+    "10": "TEN_MINUTE",
+    "15": "FIFTEEN_MINUTE",
+    "30": "THIRTY_MINUTE",
+    "60": "ONE_HOUR",
+}
+
+
+def resolve_interval(value: str) -> str:
+    v = value.strip().upper().rstrip("M")
+    if v in INTERVAL_NAMES:
+        return INTERVAL_NAMES[v]
+    name = value.strip().upper()
+    if name in INTERVAL_NAMES.values():
+        return name
+    raise SystemExit(f"Unsupported --interval {value!r}. AngelOne supports: 1, 3, 5, 10, 15, 30, 60 minutes (no 2-minute candles).")
 
 
 if __name__ == "__main__":
     args = parse_args()
     cfg = load_config(args.config)
+    if args.interval:
+        cfg.setdefault("instrument", {})["interval"] = resolve_interval(args.interval)
 
     # Supplying --from/--to switches to broker-backed backtest. Plain `python main.py`
     # remains live/config-driven.

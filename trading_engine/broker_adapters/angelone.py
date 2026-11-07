@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
@@ -19,6 +20,21 @@ INTERVAL_MINUTES = {
     "ONE_HOUR": 60,
     "ONE_DAY": 1440,
 }
+
+# AngelOne getCandleData rejects ranges longer than these per request.
+# Requests are split into chunks one day shorter than the limit.
+MAX_DAYS_PER_REQUEST = {
+    "ONE_MINUTE": 30,
+    "THREE_MINUTE": 60,
+    "FIVE_MINUTE": 100,
+    "TEN_MINUTE": 100,
+    "FIFTEEN_MINUTE": 200,
+    "THIRTY_MINUTE": 200,
+    "ONE_HOUR": 400,
+    "ONE_DAY": 2000,
+}
+
+CHUNK_SLEEP_SECONDS = 0.35
 
 
 @dataclass
@@ -59,6 +75,9 @@ class AngelOneBroker:
         )
         self.obj = None
         self.execution_instrument = (cfg.get("execution", {}) or {}).get("resolved_instrument", {}) or {}
+        # In-memory candle store for live polling, keyed by (exchange, token).
+        # Lets each poll download only candles newer than the last one held.
+        self._live_candles: Dict[tuple, pd.DataFrame] = {}
 
     def set_execution_instrument(self, instrument: Dict[str, Any]) -> None:
         self.execution_instrument = instrument or {}
@@ -80,48 +99,91 @@ class AngelOneBroker:
             raise RuntimeError(f"AngelOne login failed: {session}")
         return self.obj
 
-    def get_candles(self, start_dt: datetime, end_dt: datetime) -> pd.DataFrame:
-        if self.obj is None:
-            self.connect()
-        params = {
-            "exchange": self.settings.exchange,
-            "symboltoken": str(self.settings.symboltoken),
-            "interval": self.settings.interval,
-            "fromdate": start_dt.strftime("%Y-%m-%d %H:%M"),
-            "todate": end_dt.strftime("%Y-%m-%d %H:%M"),
-        }
-        res = self.obj.getCandleData(params)
-        if not res or not res.get("status"):
-            raise RuntimeError(f"AngelOne candle fetch failed: {res}")
-        rows = res.get("data") or []
-        df = pd.DataFrame(rows, columns=["datetime", "open", "high", "low", "close", "volume"])
-        return normalize_ohlc(df, self.cfg.get("engine", {}).get("timezone", "Asia/Kolkata"))
+    def _naive_local(self, dt) -> datetime:
+        ts = pd.Timestamp(dt)
+        if ts.tzinfo is not None:
+            ts = ts.tz_convert(self.tz).tz_localize(None)
+        return ts.to_pydatetime()
 
-    def get_futures_candles(self, start_dt: datetime, end_dt: datetime) -> pd.DataFrame:
-        """Fetch OHLCV candles for the execution (futures) instrument."""
+    def _fetch_range(self, exchange: str, symboltoken: str, start_dt: datetime, end_dt: datetime) -> pd.DataFrame:
+        """Fetch [start_dt, end_dt], split into chunks within AngelOne's per-request day limit."""
         if self.obj is None:
             self.connect()
+        tz_name = self.cfg.get("engine", {}).get("timezone", "Asia/Kolkata")
+        # AngelOne takes wall-clock exchange time; drop tzinfo after converting.
+        start_dt = self._naive_local(start_dt)
+        end_dt = self._naive_local(end_dt)
+        max_days = MAX_DAYS_PER_REQUEST.get(self.settings.interval, 30)
+        step = timedelta(days=max(1, max_days - 1))
+        parts = []
+        cur = start_dt
+        while cur <= end_dt:
+            chunk_end = min(cur + step, end_dt)
+            params = {
+                "exchange": exchange,
+                "symboltoken": symboltoken,
+                "interval": self.settings.interval,
+                "fromdate": cur.strftime("%Y-%m-%d %H:%M"),
+                "todate": chunk_end.strftime("%Y-%m-%d %H:%M"),
+            }
+            res = self.obj.getCandleData(params)
+            if not res or not res.get("status"):
+                raise RuntimeError(f"AngelOne candle fetch failed: {res}")
+            rows = res.get("data") or []
+            if rows:
+                parts.append(pd.DataFrame(rows, columns=["datetime", "open", "high", "low", "close", "volume"]))
+            if chunk_end >= end_dt:
+                break
+            cur = chunk_end + timedelta(minutes=1)
+            time.sleep(CHUNK_SLEEP_SECONDS)
+        if not parts:
+            return normalize_ohlc(pd.DataFrame(columns=["datetime", "open", "high", "low", "close", "volume"]), tz_name)
+        return normalize_ohlc(pd.concat(parts, ignore_index=True), tz_name)
+
+    def _fetch_incremental(self, exchange: str, symboltoken: str, start_dt: datetime, end_dt: datetime) -> pd.DataFrame:
+        """Like _fetch_range, but reuse candles already held from earlier live polls.
+
+        Only candles from the last held candle onward are re-downloaded. The last
+        held candle is fetched again so a candle that was still forming is replaced.
+        """
+        key = (exchange, symboltoken)
+        held = self._live_candles.get(key)
+        start_ts = pd.Timestamp(start_dt)
+        if held is not None and not held.empty:
+            if start_ts.tzinfo is None:
+                start_ts = start_ts.tz_localize(held["datetime"].iloc[0].tzinfo)
+            if held["datetime"].min() <= start_ts + timedelta(days=4):
+                last = held["datetime"].max()
+                fresh = self._fetch_range(exchange, symboltoken, last, end_dt)
+                merged = pd.concat([held, fresh], ignore_index=True)
+                merged = merged.sort_values("datetime").drop_duplicates("datetime", keep="last")
+                merged = merged[merged["datetime"] >= start_ts].reset_index(drop=True)
+                self._live_candles[key] = merged
+                return merged.copy()
+        full = self._fetch_range(exchange, symboltoken, start_dt, end_dt)
+        self._live_candles[key] = full
+        return full.copy()
+
+    def get_candles(self, start_dt: datetime, end_dt: datetime, incremental: bool = False) -> pd.DataFrame:
+        exchange = self.settings.exchange
+        symboltoken = str(self.settings.symboltoken)
+        if incremental:
+            return self._fetch_incremental(exchange, symboltoken, start_dt, end_dt)
+        return self._fetch_range(exchange, symboltoken, start_dt, end_dt)
+
+    def get_futures_candles(self, start_dt: datetime, end_dt: datetime, incremental: bool = False) -> pd.DataFrame:
+        """Fetch OHLCV candles for the execution (futures) instrument."""
         exe = self.execution_instrument or {}
         exchange = exe.get("exchange") or "NFO"
         symboltoken = str(exe.get("symboltoken") or "")
         if not symboltoken:
             return pd.DataFrame()
-        params = {
-            "exchange": exchange,
-            "symboltoken": symboltoken,
-            "interval": self.settings.interval,
-            "fromdate": start_dt.strftime("%Y-%m-%d %H:%M"),
-            "todate": end_dt.strftime("%Y-%m-%d %H:%M"),
-        }
         try:
-            res = self.obj.getCandleData(params)
+            if incremental:
+                return self._fetch_incremental(exchange, symboltoken, start_dt, end_dt)
+            return self._fetch_range(exchange, symboltoken, start_dt, end_dt)
         except Exception:
             return pd.DataFrame()
-        if not res or not res.get("status"):
-            return pd.DataFrame()
-        rows = res.get("data") or []
-        df = pd.DataFrame(rows, columns=["datetime", "open", "high", "low", "close", "volume"])
-        return normalize_ohlc(df, self.cfg.get("engine", {}).get("timezone", "Asia/Kolkata"))
 
     def place_order(self, side: str, quantity: int, instrument: Optional[Dict[str, Any]] = None) -> Any:
         if self.obj is None:

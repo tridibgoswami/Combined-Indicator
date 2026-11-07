@@ -514,10 +514,7 @@ def _futures_candle_close(fdf: pd.DataFrame, ts) -> float | None:
             target = target.tz_localize(fdf["datetime"].iloc[0].tzinfo)
         diffs = (fdf["datetime"] - target).abs()
         idx = diffs.idxmin()
-        price = float(fdf.loc[idx, "close"])
-        nearest_dt = fdf.loc[idx, "datetime"]
-        print(f"[FUTURES] Matched ts={ts} → nearest candle={nearest_dt}, close={price}")
-        return price
+        return float(fdf.loc[idx, "close"])
     except Exception as exc:
         print(f"[FUTURES] _futures_candle_close failed for ts={ts}: {exc}")
         return None
@@ -547,9 +544,7 @@ def _enrich_futures_prices(trades: pd.DataFrame, summary: dict, fdf: pd.DataFram
                         trades.at[idx, "exit_futures_price"] = xp
 
     # Enrich summary with current open position entry futures price
-    pos = summary.get("current_position", "FLAT")
-    print(f"[FUTURES] _enrich: position={pos}, fdf_rows={len(fdf) if fdf is not None else 0}")
-    if pos not in ("FLAT", "", None):
+    if summary.get("current_position", "FLAT") not in ("FLAT", "", None):
         entry_t = summary.get("current_entry_time")
         fp = _futures_candle_close(fdf, entry_t)
         if fp is not None:
@@ -562,7 +557,8 @@ def _enrich_futures_prices(trades: pd.DataFrame, summary: dict, fdf: pd.DataFram
 def _reconstruct_from_broker(cfg: Dict[str, Any], broker, now: pd.Timestamp, out_dir: Path, prefix: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, Any]]:
     instr = cfg.get("instrument", {}) or {}
     start_dt = _warmup_start(now, cfg).to_pydatetime()
-    df = broker.get_candles(start_dt, now.to_pydatetime())
+    # Live polls reuse candles held in memory and only download new ones.
+    df = broker.get_candles(start_dt, now.to_pydatetime(), incremental=True)
     df = filter_session(df, instr.get("session_start"), instr.get("session_end"))
     df = _drop_unclosed_last_candle(df, broker.interval_minutes, now)
     calc = calculate_pine_replica(df, cfg)
@@ -572,13 +568,10 @@ def _reconstruct_from_broker(cfg: Dict[str, Any], broker, now: pd.Timestamp, out
     fdf = None
     if hasattr(broker, "get_futures_candles"):
         try:
-            fdf = broker.get_futures_candles(start_dt, now.to_pydatetime())
-            print(f"[FUTURES] Fetched {len(fdf)} candles for futures instrument (start={start_dt.strftime('%Y-%m-%d')}).")
+            fdf = broker.get_futures_candles(start_dt, now.to_pydatetime(), incremental=True)
         except Exception as exc:
             print(f"[FUTURES] get_futures_candles failed: {exc}")
             fdf = None
-    else:
-        print("[FUTURES] broker has no get_futures_candles method — old image?")
     trades, summary = _enrich_futures_prices(trades, summary, fdf)
 
     write_outputs(out_dir, calc, signals, trades, summary, prefix=prefix)
