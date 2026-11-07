@@ -95,9 +95,15 @@ def load_scrip_master(cfg: Dict[str, Any], *, force: bool = False) -> list[dict[
 
 
 def _matches_underlying(row: Dict[str, Any], underlying: str) -> bool:
+    # Exact match only. A substring match let "NIFTY" pick MIDCPNIFTY, FINNIFTY
+    # and BANKNIFTY contracts too.
     u = underlying.upper().strip()
-    fields = [str(row.get(k, "")).upper() for k in ["name", "symbol", "tradingsymbol", "exch_seg"]]
-    return any(f == u or f.startswith(u) or u in f for f in fields)
+    name = str(row.get("name", "")).upper().strip()
+    if name:
+        return name == u
+    # No name column: the symbol must be the underlying followed by the expiry date.
+    sym = str(row.get("tradingsymbol") or row.get("symbol") or "").upper()
+    return sym.startswith(u) and sym[len(u):len(u) + 1].isdigit()
 
 
 def select_nearest_futures(cfg: Dict[str, Any], *, now: Optional[pd.Timestamp] = None, force_master_refresh: bool = False) -> InstrumentSelection:
