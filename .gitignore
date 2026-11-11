@@ -9,3 +9,16 @@ data/cache/*
 logs/*
 !logs/.gitkeep
 outputs/backtests/
+
+# Engine output and downloaded data are regenerated on every run
+outputs/*
+!outputs/.gitkeep
+
+# Never commit keys or credentials
+ssh-key
+ssh-key.pub
+SSH Keys/
+*.pem
+*.ppk
+id_rsa*
+id_ed25519*
