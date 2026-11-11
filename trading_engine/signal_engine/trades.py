@@ -84,6 +84,31 @@ def _minutes_since_midnight(dt: Any) -> int:
     return int(ts.hour) * 60 + int(ts.minute)
 
 
+def _closing_guard_settings(cfg: Dict[str, Any]) -> tuple[bool, str]:
+    """Return (enabled, cutoff) for the closing-session (CAS) guard.
+
+    entry_filters:
+      closing_session_guard:
+        enabled: true
+        cutoff: "15:15"
+
+    Candles starting at or after the cutoff cannot open a position: the 15:14
+    candle (closing at 15:15) is the last that may. An opposite signal from a
+    later candle still closes an open trade, without reversing. With no
+    opposite signal the position is held into the next session. Works
+    independently of enable_time_block_filter.
+    """
+    guard = dict((cfg.get("entry_filters", {}) or {}).get("closing_session_guard", {}) or {})
+    enabled = _to_bool(guard.get("enabled", False), False)
+    cutoff = str(guard.get("cutoff", "15:15") or "15:15").strip()
+    return enabled, cutoff
+
+
+def _is_after_cutoff(dt: Any, cutoff: str) -> bool:
+    ch, cm = _parse_hhmm(cutoff)
+    return _minutes_since_midnight(dt) >= ch * 60 + cm
+
+
 def _is_time_blocked(dt: Any, windows: list[tuple[str, str]]) -> bool:
     minute = _minutes_since_midnight(dt)
     for start_raw, end_raw in windows:
@@ -162,6 +187,7 @@ def build_trades(calc: pd.DataFrame, cfg: Dict[str, Any], start=None, end=None) 
 
     mae_enabled, mae_points = _risk_settings(cfg)
     time_filter_enabled, blocked_entry_windows = _entry_filter_settings(cfg)
+    closing_guard_enabled, closing_cutoff = _closing_guard_settings(cfg)
 
     pos = 0
     entry_price = None
@@ -234,7 +260,8 @@ def build_trades(calc: pd.DataFrame, cfg: Dict[str, Any], start=None, end=None) 
         # indicator. MAE exits are intentionally not appended here.
         if sig in {"BUY", "SELL"}:
             side = 1 if sig == "BUY" else -1
-            entry_blocked = time_filter_enabled and _is_time_blocked(time, blocked_entry_windows)
+            closing_blocked = closing_guard_enabled and _is_after_cutoff(time, closing_cutoff)
+            entry_blocked = (time_filter_enabled and _is_time_blocked(time, blocked_entry_windows)) or closing_blocked
             signals.append({
                 "datetime": time,
                 "signal": sig,
@@ -244,6 +271,7 @@ def build_trades(calc: pd.DataFrame, cfg: Dict[str, Any], start=None, end=None) 
                 "is_chop": bool(r.get("is_chop", False)),
                 "source": "INDICATOR",
                 "entry_time_blocked": entry_blocked,
+                "closing_session_blocked": closing_blocked,
             })
 
             if pos == 0:
@@ -330,5 +358,7 @@ def build_trades(calc: pd.DataFrame, cfg: Dict[str, Any], start=None, end=None) 
         "mae_points": mae_points,
         "time_block_filter_enabled": time_filter_enabled,
         "blocked_entry_windows": [f"{a}-{b}" for a, b in blocked_entry_windows],
+        "closing_session_guard_enabled": closing_guard_enabled,
+        "closing_session_cutoff": closing_cutoff,
     }
     return sig_df, trades_df, summary

@@ -284,6 +284,8 @@ def print_live_dashboard(
         print(f"Entry Time Filter : enabled / {windows}")
     else:
         print("Entry Time Filter : disabled")
+    if summary.get("closing_session_guard_enabled"):
+        print(f"Closing Guard     : no new entries from {summary.get('closing_session_cutoff')}; opposite signal exits to FLAT")
     spot_ltp = _safe_ltp(broker, execution=False)
     if spot_ltp is not None:
         print(f"Spot LTP (live)   : {spot_ltp:.2f}")
@@ -385,6 +387,8 @@ def _summarize_backtest(cfg: Dict[str, Any], summary: Dict[str, Any], start: pd.
         print(f"Entry Time Filter : enabled / {windows}")
     else:
         print("Entry Time Filter : disabled")
+    if summary.get("closing_session_guard_enabled"):
+        print(f"Closing Guard     : no new entries from {summary.get('closing_session_cutoff')}; opposite signal exits to FLAT")
     print(f"Indicator Signals : {summary.get('signals', 0)}")
     print(f"Closed Trades     : {summary.get('closed_trades', 0)}")
     print(f"Open Trades       : {1 if summary.get('current_position') != 'FLAT' else 0}")

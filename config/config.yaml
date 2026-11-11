@@ -89,6 +89,9 @@ entry_filters:
   blocked_entry_windows:
   - 10:30-11:15
   - 12:45-13:30
+  closing_session_guard:
+    enabled: true
+    cutoff: '15:15'
 risk_management:
   mode: FIXED_POINTS
   enable_mae_exit: true

@@ -39,10 +39,20 @@ def test_backtest_is_deterministic(cfg):
 
 
 def test_backtest_produces_known_trade_count(cfg):
+    # Locks in the original behavior so future refactors can't silently change it.
+    cfg["entry_filters"]["closing_session_guard"]["enabled"] = False
     _, trades, summary = _run(cfg)
-    # Locks in current behavior so future refactors can't silently change it.
     assert summary["closed_trades"] == 3
     assert summary["current_position"] == "LONG"
+
+
+def test_closing_session_guard_blocks_late_reversal(cfg):
+    # Same data: the 15:15 BUY still closes the SHORT but does not reverse.
+    cfg["entry_filters"]["closing_session_guard"]["enabled"] = True
+    _, trades, summary = _run(cfg)
+    assert summary["closed_trades"] == 3
+    assert summary["current_position"] == "FLAT"
+    assert trades.iloc[-1]["exit_signal"] == "BUY"
 
 
 def test_mae_exit_is_config_driven(cfg):
