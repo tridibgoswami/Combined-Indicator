@@ -30,6 +30,10 @@ services:
     restart: unless-stopped
     env_file:
       - ../.env
+    environment:
+      # Docker restarts an exited engine, so keep it alive between sessions.
+      MARKET_AUTO_EXIT: "false"
+      MARKET_STAY_ALIVE_CLOSED_DAY: "true"
     volumes:
       - ../config:/app/config
       - ../data:/app/data

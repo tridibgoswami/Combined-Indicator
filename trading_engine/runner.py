@@ -849,14 +849,25 @@ def run_live(cfg: Dict[str, Any]) -> None:
 
         if state == "POST_MARKET":
             print("Market closed. Reconstructing final post-market state...")
-            _, signals, trades, summary = _reconstruct_from_broker(cfg, broker, now, out_dir, prefix="live_postmarket")
+            try:
+                _, signals, trades, summary = _reconstruct_from_broker(cfg, broker, now, out_dir, prefix="live_postmarket")
+            except Exception as exc:
+                if _is_rate_limit_error(exc):
+                    print(f"AngelOne rate limit hit. Retrying post-market reconstruction in {rate_limit_backoff_seconds}s.")
+                    time.sleep(rate_limit_backoff_seconds)
+                else:
+                    print(f"Post-market reconstruction failed: {exc}. Retrying in {post_market_refresh}s.")
+                    time.sleep(post_market_refresh)
+                continue
             msg = _session_wait_message(now, target, "Next trading session")
             suffix = "\nEngine exiting gracefully." if auto_exit else "\nEngine will remain alive and wait for the next session."
             print_live_dashboard(cfg, summary, signals, trades, market_status=status_text, exit_message=msg + suffix, show_signal_results=not startup_signal_results_shown, broker=broker)
             startup_signal_results_shown = True
             if auto_exit:
                 return
-            time.sleep(post_market_refresh)
+            # The final state can't change after the close: sleep until the next
+            # session instead of re-downloading candles every few seconds.
+            _sleep_countdown(cfg, target, "Waiting for next trading session")
             continue
 
         # LIVE state

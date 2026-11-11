@@ -91,6 +91,14 @@ def apply_env_overrides(cfg: Dict[str, Any]) -> Dict[str, Any]:
     if os.getenv("TRADE_STARTUP_POSITION") is not None:
         e["trade_reconstructed_position_on_startup"] = env_bool("TRADE_STARTUP_POSITION", bool(e.get("trade_reconstructed_position_on_startup", False)))
 
+    # Under Docker (restart: unless-stopped) an exiting engine is relaunched in
+    # a loop, so the container sets these to keep the engine alive instead.
+    m = cfg.setdefault("market", {})
+    if os.getenv("MARKET_AUTO_EXIT") is not None:
+        m["auto_exit_after_market_close"] = env_bool("MARKET_AUTO_EXIT", bool(m.get("auto_exit_after_market_close", True)))
+    if os.getenv("MARKET_STAY_ALIVE_CLOSED_DAY") is not None:
+        m["stay_alive_on_closed_day"] = env_bool("MARKET_STAY_ALIVE_CLOSED_DAY", bool(m.get("stay_alive_on_closed_day", False)))
+
     r = cfg.setdefault("risk_management", {})
     if os.getenv("RISK_MODE"):
         r["mode"] = os.getenv("RISK_MODE")
