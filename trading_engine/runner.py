@@ -231,6 +231,16 @@ def _format_live_signal_results(cfg: Dict[str, Any], trades: pd.DataFrame, summa
     return result
 
 
+def _safe_ltp(broker, execution: bool) -> float | None:
+    """Live last traded price from the broker, or None if unavailable."""
+    if broker is None or not hasattr(broker, "ltp"):
+        return None
+    try:
+        return float(broker.ltp(execution=execution))
+    except Exception:
+        return None
+
+
 def print_live_dashboard(
     cfg: Dict[str, Any],
     summary: Dict[str, Any],
@@ -240,6 +250,7 @@ def print_live_dashboard(
     exit_message: str | None = None,
     next_session_message: str | None = None,
     show_signal_results: bool = True,
+    broker=None,
 ) -> None:
     instr = cfg.get("instrument", {})
     engine = cfg.get("engine", {})
@@ -273,13 +284,28 @@ def print_live_dashboard(
         print(f"Entry Time Filter : enabled / {windows}")
     else:
         print("Entry Time Filter : disabled")
+    spot_ltp = _safe_ltp(broker, execution=False)
+    if spot_ltp is not None:
+        print(f"Spot LTP (live)   : {spot_ltp:.2f}")
     print("-" * 72)
     print("CURRENT STATUS")
     print(f"Current Position  : {current_position}")
     if current_entry_price is not None:
-        print(f"Current Entry     : {current_entry_time} @ {current_entry_price}")
-        print(f"Open Points       : {open_points:.2f}")
+        direction = 1.0 if current_position == "LONG" else -1.0
+        last_spot_close = float(current_entry_price) + direction * open_points
+        print(f"Current Entry     : {current_entry_time} @ {current_entry_price} (spot candle close)")
+        print(f"Last Spot Close   : {last_spot_close:.2f}")
+        print(f"Open Points       : {open_points:.2f} (spot)")
         print(f"Open PnL          : {open_pnl:.2f}")
+        entry_fp = summary.get("entry_futures_price")
+        if entry_fp is not None:
+            print(f"Futures Entry     : {float(entry_fp):.2f} (futures candle close at entry)")
+            fut_ltp = _safe_ltp(broker, execution=True)
+            if fut_ltp is not None:
+                fut_points = direction * (fut_ltp - float(entry_fp))
+                print(f"Futures LTP       : {fut_ltp:.2f}")
+                print(f"Futures Points    : {fut_points:.2f}")
+                print(f"Futures PnL       : {fut_points * lot_size * lots:.2f}")
         if mae_enabled and mae_points is not None:
             remaining = max(0.0, float(mae_points) + open_points) if open_points < 0 else float(mae_points)
             print(f"MAE Limit         : {float(mae_points):.2f}")
@@ -794,7 +820,7 @@ def run_live(cfg: Dict[str, Any]) -> None:
                 print(f"Unable to reconstruct closed-day state: {exc}")
                 signals, trades, summary = pd.DataFrame(), pd.DataFrame(), {"current_position": "UNKNOWN", "open_points": 0.0}
             msg = _session_wait_message(now, target, "Next trading session")
-            print_live_dashboard(cfg, summary, signals, trades, market_status=status_text, exit_message=(msg + ("\nEngine exiting gracefully." if not stay_alive_closed else "")), show_signal_results=not startup_signal_results_shown)
+            print_live_dashboard(cfg, summary, signals, trades, market_status=status_text, exit_message=(msg + ("\nEngine exiting gracefully." if not stay_alive_closed else "")), show_signal_results=not startup_signal_results_shown, broker=broker)
             startup_signal_results_shown = True
             if not stay_alive_closed:
                 return
@@ -807,7 +833,7 @@ def run_live(cfg: Dict[str, Any]) -> None:
                 _, signals, trades, summary = _reconstruct_from_broker(cfg, broker, now, out_dir, prefix="live_premarket")
                 label = "Market opens at" if state == "PRE_MARKET" else "Trading begins at"
                 msg = _session_wait_message(now, target, label)
-                print_live_dashboard(cfg, summary, signals, trades, market_status=status_text, next_session_message=msg, show_signal_results=not startup_signal_results_shown)
+                print_live_dashboard(cfg, summary, signals, trades, market_status=status_text, next_session_message=msg, show_signal_results=not startup_signal_results_shown, broker=broker)
                 startup_signal_results_shown = True
                 if not execution_started:
                     execution_manager.startup_sync(summary)
@@ -822,7 +848,7 @@ def run_live(cfg: Dict[str, Any]) -> None:
             _, signals, trades, summary = _reconstruct_from_broker(cfg, broker, now, out_dir, prefix="live_postmarket")
             msg = _session_wait_message(now, target, "Next trading session")
             suffix = "\nEngine exiting gracefully." if auto_exit else "\nEngine will remain alive and wait for the next session."
-            print_live_dashboard(cfg, summary, signals, trades, market_status=status_text, exit_message=msg + suffix, show_signal_results=not startup_signal_results_shown)
+            print_live_dashboard(cfg, summary, signals, trades, market_status=status_text, exit_message=msg + suffix, show_signal_results=not startup_signal_results_shown, broker=broker)
             startup_signal_results_shown = True
             if auto_exit:
                 return
@@ -926,7 +952,7 @@ def run_live(cfg: Dict[str, Any]) -> None:
             latest_closed = calc["datetime"].max() if not calc.empty else None
             if latest_closed is not None and latest_closed != last_processed_candle:
                 last_processed_candle = latest_closed
-                print_live_dashboard(cfg, summary, signals, trades, market_status=status_text, show_signal_results=False)
+                print_live_dashboard(cfg, summary, signals, trades, market_status=status_text, show_signal_results=False, broker=broker)
                 if not execution_started:
                     execution_manager.startup_sync(summary)
                     execution_started = True
